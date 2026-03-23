@@ -452,8 +452,8 @@ FPE.Viewport = (function () {
   }
 
   function onTouchStart(e) {
+    e.preventDefault(); // iOS Safari のスクロール・バウンスを常に抑制
     if (e.touches.length === 2) {
-      e.preventDefault();
       var t0 = e.touches[0], t1 = e.touches[1];
       touchStartDist = getTouchDist(t0, t1);
       touchStartZoom = zoom;
@@ -466,8 +466,8 @@ FPE.Viewport = (function () {
   }
 
   function onTouchMove(e) {
+    e.preventDefault(); // iOS Safari のスクロール・バウンスを常に抑制
     if (e.touches.length === 2) {
-      e.preventDefault();
       var t0 = e.touches[0], t1 = e.touches[1];
       var dist = getTouchDist(t0, t1);
       var midX = (t0.clientX + t1.clientX) / 2;
