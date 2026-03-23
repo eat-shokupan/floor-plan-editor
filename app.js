@@ -81,6 +81,41 @@ FPE.Snap = {
     return Math.max(min, snapped);
   },
 };
+
+// format.js - 表示用フォーマッタ
+window.FPE = window.FPE || {};
+FPE.Format = (function () {
+  /**
+   * 小数2桁表示（.00 は整数に省略）
+   * 例: 3.00 -> "3", 3.10 -> "3.10"
+   */
+  function formatFixed2(n) {
+    var num = Number(n);
+    if (!isFinite(num)) return '';
+    if (Math.abs(num) < 1e-12) num = 0; // -0 対策
+    var s = num.toFixed(2);
+    if (/\.00$/.test(s)) return num.toFixed(0);
+    return s;
+  }
+
+  /**
+   * 小数1桁表示（.0 は整数に省略）
+   * 例: 3.0 -> "3", 3.1 -> "3.1"
+   */
+  function formatFixed1(n) {
+    var num = Number(n);
+    if (!isFinite(num)) return '';
+    if (Math.abs(num) < 1e-12) num = 0; // -0 対策
+    var s = num.toFixed(1);
+    if (/\.0$/.test(s)) return num.toFixed(0);
+    return s;
+  }
+
+  return {
+    formatFixed2: formatFixed2,
+    formatFixed1: formatFixed1,
+  };
+})();
 // data-model.js - データモデル＋イベントシステム
 window.FPE = window.FPE || {};
 
@@ -331,6 +366,8 @@ FPE.Viewport = (function () {
   let touchStartPanY = 0;
   let touchMidX = 0;
   let touchMidY = 0;
+  // キー操作（Ctrl+C / Ctrl+V）時にペースト位置を決めるための、直近カーソル座標（グリッド）
+  let lastCursorGrid = { x: 0, y: 0 };
 
   function init(svgEl) {
     svg = svgEl;
@@ -413,6 +450,7 @@ FPE.Viewport = (function () {
     // カーソル位置をグリッド座標で表示
     if (svg) {
       var pos = screenToGrid(e.clientX, e.clientY);
+      lastCursorGrid = pos;
       var cursorLabel = document.getElementById('cursor-pos');
       if (cursorLabel) {
         cursorLabel.textContent = '(' + pos.x.toFixed(1) + ', ' + pos.y.toFixed(1) + ')';
@@ -489,6 +527,7 @@ FPE.Viewport = (function () {
     } else if (e.touches.length === 1) {
       // 1本指タッチ時のカーソル座標更新
       var pos = screenToGrid(e.touches[0].clientX, e.touches[0].clientY);
+      lastCursorGrid = pos;
       var cursorLabel = document.getElementById('cursor-pos');
       if (cursorLabel) {
         cursorLabel.textContent = '(' + pos.x.toFixed(1) + ', ' + pos.y.toFixed(1) + ')';
@@ -551,6 +590,8 @@ FPE.Viewport = (function () {
     getZoom: getZoom,
     getPan: getPan,
     setPan: setPan,
+    // 直近のカーソル位置（グリッド座標）
+    getLastCursorGrid: function () { return { x: lastCursorGrid.x, y: lastCursorGrid.y }; },
     isSpaceDown: isSpaceDown,
     getIsPanning: getIsPanning,
     updateTransform: updateTransform,
@@ -914,8 +955,8 @@ FPE.SelectionManager = (function () {
     var bounds = getRoomBounds(room);
     var tatami = calcTatami(room);
     var MM = FPE.CONST.GRID_MM;
-    var totalW_mm = Math.round(bounds.width * MM);
-    var totalH_mm = Math.round(bounds.height * MM);
+    var totalW_mm = bounds.width * MM;
+    var totalH_mm = bounds.height * MM;
 
     var html =
       '<div class="prop-group">' +
@@ -929,24 +970,24 @@ FPE.SelectionManager = (function () {
       '<div class="prop-group">' +
         '<label>全体サイズ</label>' +
         '<span>' + bounds.width.toFixed(1) + ' × ' + bounds.height.toFixed(1) + ' マス</span><br>' +
-        '<span class="mm-value">' + totalW_mm + ' × ' + totalH_mm + ' mm</span>' +
+        '<span class="mm-value">' + FPE.Format.formatFixed2(totalW_mm) + ' × ' + FPE.Format.formatFixed2(totalH_mm) + ' mm</span>' +
       '</div>' +
       '<div class="prop-group">' +
         '<label>帖数</label>' +
-        '<span class="tatami-value">' + tatami.toFixed(1) + ' 帖</span>' +
+        '<span class="tatami-value">' + FPE.Format.formatFixed1(tatami) + ' 帖</span>' +
       '</div>';
 
     if (room.parts.length > 0) {
       html += '<div class="prop-group"><label>パーツ寸法</label>';
       room.parts.forEach(function (p, i) {
-        var pw_mm = Math.round(p.width * MM);
-        var ph_mm = Math.round(p.height * MM);
+        var pw_mm = p.width * MM;
+        var ph_mm = p.height * MM;
         var pTatami = (p.width * p.height) / FPE.CONST.TATAMI_DIVISOR;
         html += '<div class="part-info">' +
           '<span class="part-label">Part ' + (i + 1) + ':</span> ' +
           p.width.toFixed(1) + '×' + p.height.toFixed(1) +
-          ' <span class="mm-value">(' + pw_mm + '×' + ph_mm + 'mm)</span>' +
-          ' <span class="part-tatami">' + pTatami.toFixed(1) + '帖</span>';
+          ' <span class="mm-value">(' + FPE.Format.formatFixed2(pw_mm) + '×' + FPE.Format.formatFixed2(ph_mm) + 'mm)</span>' +
+          ' <span class="part-tatami">' + FPE.Format.formatFixed1(pTatami) + '帖</span>';
         if (room.parts.length > 1) {
           html += ' <button class="btn-delete-part small-btn danger" data-part-index="' + i + '" style="padding:0 4px;font-size:11px;min-width:auto;margin-left:4px;">×</button>';
         }
@@ -1116,7 +1157,7 @@ FPE.SelectionManager = (function () {
       html +=
         '<div class="prop-group">' +
           '<label>合計帖数</label>' +
-          '<span class="tatami-value">' + totalTatami.toFixed(1) + ' 帖</span>' +
+          '<span class="tatami-value">' + FPE.Format.formatFixed1(totalTatami) + ' 帖</span>' +
         '</div>';
     }
 
@@ -1299,20 +1340,20 @@ FPE.RoomManager = (function () {
       'font-size': 11,
       fill: '#666', 'pointer-events': 'none',
     });
-    tatamiLabel.textContent = tatami.toFixed(1) + '帖';
+    tatamiLabel.textContent = FPE.Format.formatFixed1(tatami) + '帖';
     layerLabels.appendChild(tatamiLabel);
 
     if (room.parts.length === 1) {
       var singleBounds = FPE.SelectionManager.getRoomBounds(room);
-      var totalW_mm = Math.round(singleBounds.width * MM);
-      var totalH_mm = Math.round(singleBounds.height * MM);
+      var totalW_mm = singleBounds.width * MM;
+      var totalH_mm = singleBounds.height * MM;
       var mmLabel = FPE.GridRenderer.createSVG('text', {
         x: cx, y: cy + 22,
         'text-anchor': 'middle', 'dominant-baseline': 'auto',
         'font-size': 10,
         fill: '#999', 'pointer-events': 'none',
       });
-      mmLabel.textContent = totalW_mm + '×' + totalH_mm + 'mm';
+      mmLabel.textContent = FPE.Format.formatFixed2(totalW_mm) + '×' + FPE.Format.formatFixed2(totalH_mm) + 'mm';
       layerLabels.appendChild(mmLabel);
     }
 
@@ -1320,15 +1361,15 @@ FPE.RoomManager = (function () {
       room.parts.forEach(function (p) {
         var pcx = (p.x + p.width / 2) * G;
         var pcy = (p.y + p.height / 2) * G;
-        var pw_mm = Math.round(p.width * MM);
-        var ph_mm = Math.round(p.height * MM);
+        var pw_mm = p.width * MM;
+        var ph_mm = p.height * MM;
         var partLabel = FPE.GridRenderer.createSVG('text', {
           x: pcx, y: pcy + 4,
           'text-anchor': 'middle', 'dominant-baseline': 'auto',
           'font-size': 9,
           fill: '#aaa', 'pointer-events': 'none',
         });
-        partLabel.textContent = pw_mm + '×' + ph_mm;
+        partLabel.textContent = FPE.Format.formatFixed2(pw_mm) + '×' + FPE.Format.formatFixed2(ph_mm);
         layerLabels.appendChild(partLabel);
       });
     }
@@ -1837,8 +1878,8 @@ FPE.RoomManager = (function () {
     if (w >= 0.25 && h >= 0.25) {
       var tatami = (w * h) / FPE.CONST.TATAMI_DIVISOR;
       var MM = FPE.CONST.GRID_MM;
-      var w_mm = Math.round(w * MM);
-      var h_mm = Math.round(h * MM);
+      var w_mm = w * MM;
+      var h_mm = h * MM;
       var cx = (x + w / 2) * G;
       var cy = (y + h / 2) * G;
       var sizeText = FPE.GridRenderer.createSVG('text', {
@@ -1847,14 +1888,14 @@ FPE.RoomManager = (function () {
         'font-size': 12, fill: FPE.CONST.COLOR_SELECTION,
         'pointer-events': 'none',
       });
-      sizeText.textContent = w.toFixed(1) + '×' + h.toFixed(1) + ' (' + tatami.toFixed(1) + '帖)';
+      sizeText.textContent = w.toFixed(1) + '×' + h.toFixed(1) + ' (' + FPE.Format.formatFixed1(tatami) + '帖)';
       var mmText = FPE.GridRenderer.createSVG('text', {
         x: cx, y: cy + 9,
         'text-anchor': 'middle', 'dominant-baseline': 'middle',
         'font-size': 11, fill: FPE.CONST.COLOR_SELECTION,
         'pointer-events': 'none',
       });
-      mmText.textContent = w_mm + '×' + h_mm + 'mm';
+      mmText.textContent = FPE.Format.formatFixed2(w_mm) + '×' + FPE.Format.formatFixed2(h_mm) + 'mm';
       layer.appendChild(sizeText);
       layer.appendChild(mmText);
     }
@@ -2209,6 +2250,20 @@ FPE.WallManager = (function () {
       layer.appendChild(bg);
       layer.appendChild(line1);
       layer.appendChild(line2);
+
+      // クリック可能な透明ヒットエリア（窓の操作用）
+      var hitGroup = FPE.GridRenderer.createSVG('g', {
+        cursor: 'pointer',
+        'data-wall-id': wall.id,
+        'data-opening-pos': opening.position,
+      });
+      hitGroup.classList.add('window-hit');
+      var hitLine = FPE.GridRenderer.createSVG('line', {
+        x1: sx, y1: sy, x2: ex, y2: ey,
+        stroke: 'transparent', 'stroke-width': 10,
+      });
+      hitGroup.appendChild(hitLine);
+      layer.appendChild(hitGroup);
     } else if (opening.type === 'door') {
       // ドア: 線＋円弧
       var swing = opening.swing === 'right' ? 1 : -1;
@@ -2281,6 +2336,13 @@ FPE.WallManager = (function () {
       return;
     }
 
+    // 既存窓のクリック判定
+    var windowHit = e.target.closest('.window-hit');
+    if (windowHit) {
+      handleWindowClick(windowHit, e);
+      return;
+    }
+
     var wallEl = e.target.closest('.wall-line');
     if (!wallEl) return;
     var wallId = wallEl.dataset.wallId;
@@ -2328,6 +2390,17 @@ FPE.WallManager = (function () {
     });
     if (!opening) return;
 
+    var isDoubleClick = (typeof e.detail === 'number' && e.detail >= 2);
+    if (e.shiftKey || e.altKey || isDoubleClick) {
+      // Shift+クリック → ドア削除
+      var idx = wall.openings.indexOf(opening);
+      if (idx >= 0) wall.openings.splice(idx, 1);
+      FPE.DataModel.emit('walls-updated');
+      if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+      renderWalls();
+      return;
+    }
+
     if (e.ctrlKey || e.metaKey) {
       // Ctrl+クリック → ヒンジ位置反転
       opening.hinge = (opening.hinge || 'start') === 'start' ? 'end' : 'start';
@@ -2335,6 +2408,26 @@ FPE.WallManager = (function () {
       // クリック → swing方向反転
       opening.swing = opening.swing === 'left' ? 'right' : 'left';
     }
+
+    FPE.DataModel.emit('walls-updated');
+    if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+    renderWalls();
+  }
+
+  /** 既存窓クリック: クリック→削除 */
+  function handleWindowClick(hitEl, e) {
+    var wallId = hitEl.dataset.wallId;
+    var openingPos = parseFloat(hitEl.dataset.openingPos);
+    var wall = FPE.DataModel.findWall(wallId);
+    if (!wall || !wall.openings) return;
+
+    var opening = wall.openings.find(function (op) {
+      return op.type === 'window' && Math.abs(op.position - openingPos) < 0.01;
+    });
+    if (!opening) return;
+
+    var idx = wall.openings.indexOf(opening);
+    if (idx >= 0) wall.openings.splice(idx, 1);
 
     FPE.DataModel.emit('walls-updated');
     if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
@@ -3075,6 +3168,8 @@ window.FPE = window.FPE || {};
 
 FPE.UI = (function () {
   var svg = null;
+  // 選択オブジェクトのコピー用バッファ（Ctrl+C / Ctrl+V）
+  var objectClipboard = null;
 
   function init() {
     svg = document.getElementById('main-svg');
@@ -3303,9 +3398,124 @@ FPE.UI = (function () {
 
     // Delete/Backspace で選択中オブジェクトを一括削除
     window.addEventListener('keydown', function (e) {
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      var tag = e.target && e.target.tagName ? String(e.target.tagName).toUpperCase() : '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
+      var isCtrl = e.ctrlKey || e.metaKey;
+      var key = String(e.key || '').toLowerCase();
+
+      // Ctrl+C: コピー
+      if (isCtrl && key === 'c') {
+        var count = FPE.SelectionManager.getSelectedCount();
+        if (count === 0) return;
+
+        var selectedIds = FPE.SelectionManager.getSelectedIds();
+        var selectedTypes = FPE.SelectionManager.getSelectedTypes();
+
+        var minX = Infinity;
+        var minY = Infinity;
+
+        var items = [];
+
+        selectedIds.forEach(function (id) {
+          var type = selectedTypes[id];
+          if (type === 'room') {
+            var room = FPE.DataModel.findRoom(id);
+            if (!room) return;
+            var bounds = FPE.SelectionManager.getRoomBounds(room);
+            minX = Math.min(minX, bounds.x);
+            minY = Math.min(minY, bounds.y);
+
+            items.push({
+              type: 'room',
+              data: {
+                name: room.name,
+                color: room.color,
+                parts: JSON.parse(JSON.stringify(room.parts || [])),
+              },
+            });
+          } else if (type === 'stairs') {
+            var s = FPE.DataModel.findStairs(id);
+            if (!s) return;
+            minX = Math.min(minX, s.x);
+            minY = Math.min(minY, s.y);
+
+            items.push({
+              type: 'stairs',
+              data: {
+                x: s.x,
+                y: s.y,
+                width: s.width,
+                height: s.height,
+                direction: s.direction,
+                stairType: s.stairType,
+                rotation: s.rotation,
+                // コピー時はリンクを維持しない（再作成時にID衝突/不整合を避ける）
+                linkedStairsId: null,
+              },
+            });
+          }
+        });
+
+        if (items.length === 0) return;
+
+        objectClipboard = {
+          bounds: { minX: minX, minY: minY },
+          items: items,
+        };
+        e.preventDefault();
+        return;
+      }
+
+      // Ctrl+V: ペースト
+      if (isCtrl && key === 'v') {
+        if (!objectClipboard) return;
+
+        var cursor = FPE.Viewport.getLastCursorGrid ? FPE.Viewport.getLastCursorGrid() : { x: 0, y: 0 };
+        var snapped = FPE.Snap.point(cursor.x, cursor.y);
+        var deltaX = snapped.x - objectClipboard.bounds.minX;
+        var deltaY = snapped.y - objectClipboard.bounds.minY;
+
+        var newSelected = [];
+        var hasRoom = false;
+
+        objectClipboard.items.forEach(function (it) {
+          if (it.type === 'room') {
+            hasRoom = true;
+            var roomData = JSON.parse(JSON.stringify(it.data));
+            roomData.parts.forEach(function (p) {
+              p.x = FPE.Snap.toGrid(p.x + deltaX);
+              p.y = FPE.Snap.toGrid(p.y + deltaY);
+            });
+            var addedRoom = FPE.DataModel.addRoom(roomData);
+            newSelected.push({ id: addedRoom.id, type: 'room' });
+          } else if (it.type === 'stairs') {
+            var stairsData = JSON.parse(JSON.stringify(it.data));
+            stairsData.x = FPE.Snap.toGrid(stairsData.x + deltaX);
+            stairsData.y = FPE.Snap.toGrid(stairsData.y + deltaY);
+            var addedStairs = FPE.DataModel.addStairs(stairsData);
+            newSelected.push({ id: addedStairs.id, type: 'stairs' });
+          }
+        });
+
+        if (newSelected.length === 0) return;
+
+        FPE.SelectionManager.selectMultiple(newSelected);
+        FPE.ToolManager.setTool('select');
+        FPE.RoomManager.render();
+        FPE.StairsManager.render();
+        if (FPE.WallManager) {
+          if (hasRoom) FPE.WallManager.generateWalls();
+          else FPE.WallManager.renderWalls();
+        }
+        if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+
+        e.preventDefault();
+        return;
+      }
+
+      // Delete/Backspace: 選択中オブジェクト削除
+      if (e.key === 'Delete' || e.key === 'Backspace') {
         var count = FPE.SelectionManager.getSelectedCount();
         if (count === 0) return;
 
