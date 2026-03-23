@@ -3190,24 +3190,41 @@ FPE.UI = (function () {
     });
 
     // --- タッチイベント → 既存マウスハンドラ委譲 ---
+    // TouchEvent を MouseEvent 互換のオブジェクトにラップ
+    function wrapTouch(touchEvent, touch) {
+      return {
+        button: 0,
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        target: touch.target,
+        ctrlKey: touchEvent.ctrlKey || false,
+        altKey: touchEvent.altKey || false,
+        shiftKey: touchEvent.shiftKey || false,
+        metaKey: touchEvent.metaKey || false,
+        preventDefault: function () { touchEvent.preventDefault(); },
+        stopPropagation: function () { touchEvent.stopPropagation(); }
+      };
+    }
+
     svg.addEventListener('touchstart', function (e) {
       if (e.touches.length !== 1) return; // 2本指以上は viewport.js に任せる
       e.preventDefault();
       var touch = e.touches[0];
       if (FPE.Viewport.isSpaceDown()) return;
+      var me = wrapTouch(e, touch);
       var gridPos = FPE.Viewport.screenToGrid(touch.clientX, touch.clientY);
       var tool = FPE.ToolManager.getTool();
 
       if (tool === 'select') {
-        FPE.RoomManager.onMouseDown(e, gridPos);
+        FPE.RoomManager.onMouseDown(me, gridPos);
       } else if (tool === 'room') {
-        FPE.RoomManager.onMouseDown(e, gridPos);
+        FPE.RoomManager.onMouseDown(me, gridPos);
       } else if (tool === 'stairs') {
-        FPE.StairsManager.onMouseDown(e, gridPos);
+        FPE.StairsManager.onMouseDown(me, gridPos);
       } else if (tool === 'boundary') {
-        FPE.BoundaryManager.onMouseDown(e, gridPos);
+        FPE.BoundaryManager.onMouseDown(me, gridPos);
       } else if (tool === 'opening') {
-        FPE.WallManager.onWallClick(e, gridPos);
+        FPE.WallManager.onWallClick(me, gridPos);
       }
     }, { passive: false });
 
@@ -3216,30 +3233,32 @@ FPE.UI = (function () {
       e.preventDefault();
       if (FPE.Viewport.getIsPanning()) return;
       var touch = e.touches[0];
+      var me = wrapTouch(e, touch);
       var gridPos = FPE.Viewport.screenToGrid(touch.clientX, touch.clientY);
       var tool = FPE.ToolManager.getTool();
 
       if (tool === 'room' || tool === 'select') {
-        FPE.RoomManager.onMouseMove(e, gridPos);
+        FPE.RoomManager.onMouseMove(me, gridPos);
       } else if (tool === 'stairs') {
-        FPE.StairsManager.onMouseMove(e, gridPos);
+        FPE.StairsManager.onMouseMove(me, gridPos);
       } else if (tool === 'boundary') {
-        FPE.BoundaryManager.onMouseMove(e, gridPos);
+        FPE.BoundaryManager.onMouseMove(me, gridPos);
       }
     }, { passive: false });
 
     svg.addEventListener('touchend', function (e) {
       if (e.changedTouches.length === 0) return;
       var touch = e.changedTouches[0];
+      var me = wrapTouch(e, touch);
       var gridPos = FPE.Viewport.screenToGrid(touch.clientX, touch.clientY);
       var tool = FPE.ToolManager.getTool();
 
       if (tool === 'room' || tool === 'select') {
-        FPE.RoomManager.onMouseUp(e, gridPos);
+        FPE.RoomManager.onMouseUp(me, gridPos);
       } else if (tool === 'stairs') {
-        FPE.StairsManager.onMouseUp(e, gridPos);
+        FPE.StairsManager.onMouseUp(me, gridPos);
       } else if (tool === 'boundary') {
-        FPE.BoundaryManager.onMouseUp(e);
+        FPE.BoundaryManager.onMouseUp(me);
       }
     }, { passive: false });
 
