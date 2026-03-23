@@ -815,7 +815,24 @@ FPE.SelectionManager = (function () {
         { cx: px + pw,   cy: py + ph,   cursor: 'se-resize', dir: 'se' },
       ];
 
+      var touchSize = 32; // タッチ用の大きいヒット領域
       positions.forEach(function (p) {
+        // 透明な大きいタッチターゲット（下に配置）
+        var touchRect = FPE.GridRenderer.createSVG('rect', {
+          x: p.cx - touchSize/2, y: p.cy - touchSize/2,
+          width: touchSize, height: touchSize,
+          fill: 'transparent',
+          'pointer-events': 'all',
+          cursor: p.cursor,
+          'data-handle': p.dir,
+          'data-room-id': id,
+          'data-part-index': partIndex,
+        });
+        touchRect.classList.add('resize-handle-touch');
+        layer.appendChild(touchRect);
+        handles.push(touchRect);
+
+        // 見える小さいハンドル（上に配置）
         var rect = FPE.GridRenderer.createSVG('rect', {
           x: p.cx - hs/2, y: p.cy - hs/2,
           width: hs, height: hs,
@@ -1481,8 +1498,8 @@ FPE.RoomManager = (function () {
     }
 
     if (tool === 'select') {
-      // ハンドルチェック
-      if (e.target.classList.contains('resize-handle')) {
+      // ハンドルチェック（タッチ用の大きい透明領域も含む）
+      if (e.target.dataset && e.target.dataset.handle) {
         isDraggingResize = true;
         resizeDir = e.target.dataset.handle;
         resizeRoomId = e.target.dataset.roomId;
@@ -1678,11 +1695,14 @@ FPE.RoomManager = (function () {
           if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
           if (FPE.WallManager) FPE.WallManager.generateWalls();
         }
+        isAddingPart = false;
+        addPartRoomId = null;
+        FPE.ToolManager.setTool('select');
+      } else {
+        // ドラッグが小さすぎた → モード維持して再試行可能に
+        dragStart = null;
       }
-      isAddingPart = false;
-      addPartRoomId = null;
       clearPreview();
-      FPE.ToolManager.setTool('select');
       return;
     }
   }
@@ -3206,10 +3226,19 @@ FPE.UI = (function () {
       };
     }
 
+    // タッチドラッグ閾値（指の微小な動きで誤操作しないようにする）
+    var touchDragStartX = 0;
+    var touchDragStartY = 0;
+    var touchDragThresholdMet = false;
+    var TOUCH_DRAG_THRESHOLD = 10; // ピクセル
+
     svg.addEventListener('touchstart', function (e) {
       if (e.touches.length !== 1) return; // 2本指以上は viewport.js に任せる
       e.preventDefault();
       var touch = e.touches[0];
+      touchDragStartX = touch.clientX;
+      touchDragStartY = touch.clientY;
+      touchDragThresholdMet = false;
       if (FPE.Viewport.isSpaceDown()) return;
       var me = wrapTouch(e, touch);
       var gridPos = FPE.Viewport.screenToGrid(touch.clientX, touch.clientY);
@@ -3233,6 +3262,15 @@ FPE.UI = (function () {
       e.preventDefault();
       if (FPE.Viewport.getIsPanning()) return;
       var touch = e.touches[0];
+
+      // ドラッグ閾値チェック: 指が十分動くまで無視
+      if (!touchDragThresholdMet) {
+        var tdx = touch.clientX - touchDragStartX;
+        var tdy = touch.clientY - touchDragStartY;
+        if (tdx * tdx + tdy * tdy < TOUCH_DRAG_THRESHOLD * TOUCH_DRAG_THRESHOLD) return;
+        touchDragThresholdMet = true;
+      }
+
       var me = wrapTouch(e, touch);
       var gridPos = FPE.Viewport.screenToGrid(touch.clientX, touch.clientY);
       var tool = FPE.ToolManager.getTool();
@@ -3247,6 +3285,7 @@ FPE.UI = (function () {
     }, { passive: false });
 
     svg.addEventListener('touchend', function (e) {
+      if (e.touches.length > 0) return; // まだ指が残っている場合は無視
       if (e.changedTouches.length === 0) return;
       var touch = e.changedTouches[0];
       var me = wrapTouch(e, touch);
