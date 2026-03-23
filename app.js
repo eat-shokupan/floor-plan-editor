@@ -324,6 +324,14 @@ FPE.Viewport = (function () {
   let spaceDown = false;
   let svg = null;
 
+  // タッチ用変数
+  let touchStartDist = 0;
+  let touchStartZoom = 1;
+  let touchStartPanX = 0;
+  let touchStartPanY = 0;
+  let touchMidX = 0;
+  let touchMidY = 0;
+
   function init(svgEl) {
     svg = svgEl;
     updateTransform();
@@ -334,6 +342,14 @@ FPE.Viewport = (function () {
     window.addEventListener('mouseup', onMouseUp);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+
+    // タッチイベント（2本指パン・ピンチズーム）
+    svg.addEventListener('touchstart', onTouchStart, { passive: false });
+    svg.addEventListener('touchmove', onTouchMove, { passive: false });
+    svg.addEventListener('touchend', onTouchEnd, { passive: false });
+
+    // Safari デフォルトジェスチャー抑制
+    svg.style.touchAction = 'none';
   }
 
   function updateTransform() {
@@ -424,6 +440,65 @@ FPE.Viewport = (function () {
         svg.style.cursor = '';
         if (FPE.ToolManager) FPE.ToolManager.updateCursor();
       }
+    }
+  }
+
+  // --- タッチハンドラ（2本指パン・ピンチズーム） ---
+
+  function getTouchDist(t1, t2) {
+    var dx = t1.clientX - t2.clientX;
+    var dy = t1.clientY - t2.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function onTouchStart(e) {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      var t0 = e.touches[0], t1 = e.touches[1];
+      touchStartDist = getTouchDist(t0, t1);
+      touchStartZoom = zoom;
+      touchStartPanX = panX;
+      touchStartPanY = panY;
+      touchMidX = (t0.clientX + t1.clientX) / 2;
+      touchMidY = (t0.clientY + t1.clientY) / 2;
+      isPanning = true;
+    }
+  }
+
+  function onTouchMove(e) {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      var t0 = e.touches[0], t1 = e.touches[1];
+      var dist = getTouchDist(t0, t1);
+      var midX = (t0.clientX + t1.clientX) / 2;
+      var midY = (t0.clientY + t1.clientY) / 2;
+
+      // ピンチズーム
+      var scale = dist / touchStartDist;
+      var newZoom = Math.max(FPE.CONST.ZOOM_MIN, Math.min(FPE.CONST.ZOOM_MAX, touchStartZoom * scale));
+
+      // 中心点を基準にズーム + パン
+      var rect = svg.getBoundingClientRect();
+      var ox = touchMidX - rect.left;
+      var oy = touchMidY - rect.top;
+      panX = ox - (ox - touchStartPanX) * (newZoom / touchStartZoom) + (midX - touchMidX);
+      panY = oy - (oy - touchStartPanY) * (newZoom / touchStartZoom) + (midY - touchMidY);
+      zoom = newZoom;
+
+      updateTransform();
+    } else if (e.touches.length === 1) {
+      // 1本指タッチ時のカーソル座標更新
+      var pos = screenToGrid(e.touches[0].clientX, e.touches[0].clientY);
+      var cursorLabel = document.getElementById('cursor-pos');
+      if (cursorLabel) {
+        cursorLabel.textContent = '(' + pos.x.toFixed(1) + ', ' + pos.y.toFixed(1) + ')';
+      }
+    }
+  }
+
+  function onTouchEnd(e) {
+    if (e.touches.length < 2) {
+      isPanning = false;
     }
   }
 
@@ -3113,6 +3188,60 @@ FPE.UI = (function () {
         FPE.BoundaryManager.onMouseUp(e);
       }
     });
+
+    // --- タッチイベント → 既存マウスハンドラ委譲 ---
+    svg.addEventListener('touchstart', function (e) {
+      if (e.touches.length !== 1) return; // 2本指以上は viewport.js に任せる
+      e.preventDefault();
+      var touch = e.touches[0];
+      if (FPE.Viewport.isSpaceDown()) return;
+      var gridPos = FPE.Viewport.screenToGrid(touch.clientX, touch.clientY);
+      var tool = FPE.ToolManager.getTool();
+
+      if (tool === 'select') {
+        FPE.RoomManager.onMouseDown(e, gridPos);
+      } else if (tool === 'room') {
+        FPE.RoomManager.onMouseDown(e, gridPos);
+      } else if (tool === 'stairs') {
+        FPE.StairsManager.onMouseDown(e, gridPos);
+      } else if (tool === 'boundary') {
+        FPE.BoundaryManager.onMouseDown(e, gridPos);
+      } else if (tool === 'opening') {
+        FPE.WallManager.onWallClick(e, gridPos);
+      }
+    }, { passive: false });
+
+    svg.addEventListener('touchmove', function (e) {
+      if (e.touches.length !== 1) return;
+      e.preventDefault();
+      if (FPE.Viewport.getIsPanning()) return;
+      var touch = e.touches[0];
+      var gridPos = FPE.Viewport.screenToGrid(touch.clientX, touch.clientY);
+      var tool = FPE.ToolManager.getTool();
+
+      if (tool === 'room' || tool === 'select') {
+        FPE.RoomManager.onMouseMove(e, gridPos);
+      } else if (tool === 'stairs') {
+        FPE.StairsManager.onMouseMove(e, gridPos);
+      } else if (tool === 'boundary') {
+        FPE.BoundaryManager.onMouseMove(e, gridPos);
+      }
+    }, { passive: false });
+
+    svg.addEventListener('touchend', function (e) {
+      if (e.changedTouches.length === 0) return;
+      var touch = e.changedTouches[0];
+      var gridPos = FPE.Viewport.screenToGrid(touch.clientX, touch.clientY);
+      var tool = FPE.ToolManager.getTool();
+
+      if (tool === 'room' || tool === 'select') {
+        FPE.RoomManager.onMouseUp(e, gridPos);
+      } else if (tool === 'stairs') {
+        FPE.StairsManager.onMouseUp(e, gridPos);
+      } else if (tool === 'boundary') {
+        FPE.BoundaryManager.onMouseUp(e);
+      }
+    }, { passive: false });
 
     // Delete/Backspace で選択中オブジェクトを一括削除
     window.addEventListener('keydown', function (e) {
