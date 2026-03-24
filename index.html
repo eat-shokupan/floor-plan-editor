@@ -332,6 +332,91 @@
     </div>
   </div>
 
+  <!-- ボトムツールバー（タッチデバイスのみ表示） -->
+  <div class="bottom-toolbar">
+    <div class="bt-tools">
+      <button class="bt-btn active" data-tool="select" title="選択">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51z" fill="currentColor"/></svg>
+      </button>
+      <button class="bt-btn" data-tool="room" title="部屋追加">
+        <svg viewBox="0 0 24 24" width="22" height="22"><rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+      <button class="bt-btn" data-tool="stairs" title="階段">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 21h4v-4h4v-4h4v-4h4v-4h2V3h-6v4h-4v4H7v4H3z" fill="currentColor"/></svg>
+      </button>
+      <button class="bt-btn" data-tool="boundary" title="敷地">
+        <svg viewBox="0 0 24 24" width="22" height="22"><polygon points="4,20 2,8 10,2 20,4 22,16 14,22" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3,2"/></svg>
+      </button>
+      <button class="bt-btn" data-tool="opening" title="窓/ドア">
+        <svg viewBox="0 0 24 24" width="22" height="22"><rect x="3" y="6" width="18" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><line x1="12" y1="6" x2="12" y2="18" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+    </div>
+    <div class="bt-separator"></div>
+    <div class="bt-actions">
+      <button class="bt-btn" id="bt-preset" title="プリセット">
+        <svg viewBox="0 0 24 24" width="22" height="22"><rect x="3" y="3" width="7" height="7" rx="1" fill="currentColor"/><rect x="14" y="3" width="7" height="7" rx="1" fill="currentColor"/><rect x="3" y="14" width="7" height="7" rx="1" fill="currentColor"/><rect x="14" y="14" width="7" height="7" rx="1" fill="currentColor"/></svg>
+      </button>
+      <button class="bt-btn" id="bt-save" title="保存">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M17 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V7l-4-4z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 3v5h8V3M7 14h10v7H7z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+      <button class="bt-btn" id="bt-load" title="読込">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- 窓/ドアサブモード（タッチ・opening tool選択時のみ表示） -->
+  <div class="bt-submode" id="bt-submode-opening" style="display:none;">
+    <button class="bt-sub-btn active" data-submode="window">窓</button>
+    <button class="bt-sub-btn" data-submode="door">ドア</button>
+  </div>
+
+  <!-- コンテキストアクションバー（選択時のみ表示） -->
+  <div class="context-action-bar" id="context-action-bar" style="display:none;">
+    <button class="ca-btn" id="ca-copy" title="コピー">
+      <svg viewBox="0 0 24 24" width="18" height="18"><rect x="9" y="9" width="13" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      <span>コピー</span>
+    </button>
+    <button class="ca-btn" id="ca-paste" title="ペースト">
+      <svg viewBox="0 0 24 24" width="18" height="18"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="8" y="2" width="8" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      <span>ペースト</span>
+    </button>
+    <button class="ca-btn ca-danger" id="ca-delete" title="削除">
+      <svg viewBox="0 0 24 24" width="18" height="18"><polyline points="3,6 5,6 21,6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 11v6M14 11v6" stroke="currentColor" stroke-width="2"/></svg>
+      <span>削除</span>
+    </button>
+    <button class="ca-btn" id="ca-props" title="プロパティ">
+      <svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      <span>編集</span>
+    </button>
+    <div class="ca-separator"></div>
+    <button class="ca-btn" id="ca-multiselect" title="複数選択モード">
+      <svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="3" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="13" y="13" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 3h2a2 2 0 012 2v2M3 16v2a2 2 0 002 2h2" stroke="currentColor" stroke-width="2" stroke-dasharray="2,2"/></svg>
+      <span>複数選択</span>
+    </button>
+  </div>
+
+  <!-- プリセットシート（タッチ用） -->
+  <div class="sheet-overlay" id="preset-sheet-overlay" style="display:none;">
+    <div class="bottom-sheet" id="preset-sheet">
+      <div class="sheet-handle"></div>
+      <h3>プリセット部屋</h3>
+      <div class="sheet-grid" id="preset-sheet-grid"></div>
+    </div>
+  </div>
+
+  <!-- プロパティシート（タッチ用） -->
+  <div class="sheet-overlay" id="property-sheet-overlay" style="display:none;">
+    <div class="bottom-sheet" id="property-sheet">
+      <div class="sheet-handle"></div>
+      <h3>プロパティ</h3>
+      <div id="property-sheet-content"></div>
+    </div>
+  </div>
+
+  <!-- コンテキストメニュー（ドア/窓操作用） -->
+  <div class="touch-context-menu" id="touch-context-menu" style="display:none;"></div>
+
   <script src="app.js"></script>
 </body>
 </html>
