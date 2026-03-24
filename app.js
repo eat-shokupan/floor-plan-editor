@@ -38,6 +38,12 @@ FPE.CONST = {
 
   // ハンドル
   HANDLE_SIZE: 8,
+  HANDLE_SIZE_TOUCH: 24,
+  HANDLE_HIT_AREA: 48,
+
+  // タッチ
+  DRAG_THRESHOLD: 15,      // px: タップとドラッグの閾値
+  LONG_PRESS_DELAY: 300,   // ms: ロングプレス判定
 
   // 部屋プリセット
   ROOM_PRESETS: [
@@ -358,14 +364,6 @@ FPE.Viewport = (function () {
   let panStartPanY = 0;
   let spaceDown = false;
   let svg = null;
-
-  // タッチ用変数
-  let touchStartDist = 0;
-  let touchStartZoom = 1;
-  let touchStartPanX = 0;
-  let touchStartPanY = 0;
-  let touchMidX = 0;
-  let touchMidY = 0;
   // キー操作（Ctrl+C / Ctrl+V）時にペースト位置を決めるための、直近カーソル座標（グリッド）
   let lastCursorGrid = { x: 0, y: 0 };
 
@@ -379,14 +377,6 @@ FPE.Viewport = (function () {
     window.addEventListener('mouseup', onMouseUp);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-
-    // タッチイベント（2本指パン・ピンチズーム）
-    svg.addEventListener('touchstart', onTouchStart, { passive: false });
-    svg.addEventListener('touchmove', onTouchMove, { passive: false });
-    svg.addEventListener('touchend', onTouchEnd, { passive: false });
-
-    // Safari デフォルトジェスチャー抑制
-    svg.style.touchAction = 'none';
   }
 
   function updateTransform() {
@@ -430,6 +420,7 @@ FPE.Viewport = (function () {
   }
 
   function onMouseDown(e) {
+    if (FPE.TouchManager && FPE.TouchManager.isTouchActive()) return;
     // 中ボタン or Space+左ボタン
     if (e.button === 1 || (e.button === 0 && spaceDown)) {
       isPanning = true;
@@ -442,6 +433,7 @@ FPE.Viewport = (function () {
   }
 
   function onMouseMove(e) {
+    if (FPE.TouchManager && FPE.TouchManager.isTouchActive()) return;
     if (isPanning) {
       panX = panStartPanX + (e.clientX - panStartX);
       panY = panStartPanY + (e.clientY - panStartY);
@@ -481,66 +473,6 @@ FPE.Viewport = (function () {
     }
   }
 
-  // --- タッチハンドラ（2本指パン・ピンチズーム） ---
-
-  function getTouchDist(t1, t2) {
-    var dx = t1.clientX - t2.clientX;
-    var dy = t1.clientY - t2.clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-
-  function onTouchStart(e) {
-    e.preventDefault(); // iOS Safari のスクロール・バウンスを常に抑制
-    if (e.touches.length === 2) {
-      var t0 = e.touches[0], t1 = e.touches[1];
-      touchStartDist = getTouchDist(t0, t1);
-      touchStartZoom = zoom;
-      touchStartPanX = panX;
-      touchStartPanY = panY;
-      touchMidX = (t0.clientX + t1.clientX) / 2;
-      touchMidY = (t0.clientY + t1.clientY) / 2;
-      isPanning = true;
-    }
-  }
-
-  function onTouchMove(e) {
-    e.preventDefault(); // iOS Safari のスクロール・バウンスを常に抑制
-    if (e.touches.length === 2) {
-      var t0 = e.touches[0], t1 = e.touches[1];
-      var dist = getTouchDist(t0, t1);
-      var midX = (t0.clientX + t1.clientX) / 2;
-      var midY = (t0.clientY + t1.clientY) / 2;
-
-      // ピンチズーム
-      var scale = dist / touchStartDist;
-      var newZoom = Math.max(FPE.CONST.ZOOM_MIN, Math.min(FPE.CONST.ZOOM_MAX, touchStartZoom * scale));
-
-      // 中心点を基準にズーム + パン
-      var rect = svg.getBoundingClientRect();
-      var ox = touchMidX - rect.left;
-      var oy = touchMidY - rect.top;
-      panX = ox - (ox - touchStartPanX) * (newZoom / touchStartZoom) + (midX - touchMidX);
-      panY = oy - (oy - touchStartPanY) * (newZoom / touchStartZoom) + (midY - touchMidY);
-      zoom = newZoom;
-
-      updateTransform();
-    } else if (e.touches.length === 1) {
-      // 1本指タッチ時のカーソル座標更新
-      var pos = screenToGrid(e.touches[0].clientX, e.touches[0].clientY);
-      lastCursorGrid = pos;
-      var cursorLabel = document.getElementById('cursor-pos');
-      if (cursorLabel) {
-        cursorLabel.textContent = '(' + pos.x.toFixed(1) + ', ' + pos.y.toFixed(1) + ')';
-      }
-    }
-  }
-
-  function onTouchEnd(e) {
-    if (e.touches.length < 2) {
-      isPanning = false;
-    }
-  }
-
   /** スクリーン座標→グリッド座標 */
   function screenToGrid(clientX, clientY) {
     var rect = svg.getBoundingClientRect();
@@ -571,6 +503,14 @@ FPE.Viewport = (function () {
     updateTransform();
   }
 
+  /** ズーム+パンを一括設定（updateTransform 1回）。タッチピンチ用 */
+  function setZoomAndPan(z, x, y) {
+    zoom = Math.max(FPE.CONST.ZOOM_MIN, Math.min(FPE.CONST.ZOOM_MAX, z));
+    panX = x;
+    panY = y;
+    updateTransform();
+  }
+
   function getZoom() { return zoom; }
   function getPan() { return { x: panX, y: panY }; }
   function isSpaceDown() { return spaceDown; }
@@ -587,6 +527,7 @@ FPE.Viewport = (function () {
     screenToGrid: screenToGrid,
     gridToPixel: gridToPixel,
     setZoom: setZoom,
+    setZoomAndPan: setZoomAndPan,
     getZoom: getZoom,
     getPan: getPan,
     setPan: setPan,
@@ -595,6 +536,369 @@ FPE.Viewport = (function () {
     isSpaceDown: isSpaceDown,
     getIsPanning: getIsPanning,
     updateTransform: updateTransform,
+  };
+})();
+// touch-manager.js - タッチジェスチャー認識・ステートマシン
+window.FPE = window.FPE || {};
+
+FPE.TouchManager = (function () {
+  // --- 状態 ---
+  var svg = null;
+  var _isTouchDevice = false;
+  var _multiSelectMode = false;
+  var _freeSnap = false;
+
+  // ジェスチャーステート: 'idle' | 'maybe_tap' | 'dragging' | 'long_press' | 'viewport_gesture'
+  var state = 'idle';
+
+  // 1本指タッチ追跡
+  var startTouch = null;       // { id, clientX, clientY, target, time }
+  var longPressTimer = null;
+  var hasFiredMouseDown = false;
+
+  // 2本指タッチ追跡
+  var prevTouches = null;
+
+  // rAF スロットリング
+  var rafPending = false;
+  var pendingMoveTouch = null;    // 1本指ドラッグ用
+  var pendingPinchTouches = null; // 2本指ピンチ用
+
+  // --- 初期化 ---
+  function init(svgEl) {
+    svg = svgEl;
+    _isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    if (!_isTouchDevice) return;
+
+    svg.addEventListener('touchstart', onTouchStart, { passive: false });
+    svg.addEventListener('touchmove', onTouchMove, { passive: false });
+    svg.addEventListener('touchend', onTouchEnd, { passive: false });
+    svg.addEventListener('touchcancel', onTouchEnd, { passive: false });
+  }
+
+  // --- タッチ→マウス互換オブジェクト ---
+  function wrapTouch(touch) {
+    return {
+      button: 0,
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+      target: touch.target || (startTouch && startTouch.target) || svg,
+      ctrlKey: _multiSelectMode,
+      metaKey: _multiSelectMode,
+      altKey: _freeSnap,
+      shiftKey: false,
+      preventDefault: function () {},
+      stopPropagation: function () {},
+    };
+  }
+
+  // --- ステートマシン ---
+
+  function onTouchStart(e) {
+    e.preventDefault();
+    var touches = e.touches;
+
+    // 2本指以上 → VIEWPORT_GESTURE
+    if (touches.length >= 2) {
+      cancelSingleFinger();
+      state = 'viewport_gesture';
+      prevTouches = copyTouches(touches);
+      return;
+    }
+
+    // 1本指
+    if (touches.length === 1 && state === 'idle') {
+      var t = touches[0];
+      startTouch = {
+        id: t.identifier,
+        clientX: t.clientX,
+        clientY: t.clientY,
+        target: document.elementFromPoint(t.clientX, t.clientY) || t.target,
+        time: Date.now(),
+      };
+      hasFiredMouseDown = false;
+      state = 'maybe_tap';
+
+      clearLongPress();
+      longPressTimer = setTimeout(function () {
+        if (state === 'maybe_tap') {
+          state = 'long_press';
+          onLongPress();
+        }
+      }, FPE.CONST.LONG_PRESS_DELAY);
+    }
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    var touches = e.touches;
+
+    // 2本指ピンチ・パン
+    if (state === 'viewport_gesture' && touches.length >= 2) {
+      pendingPinchTouches = copyTouches(touches);
+      scheduleRAF();
+      return;
+    }
+
+    // 途中で2本指になった
+    if (touches.length >= 2 && state !== 'viewport_gesture') {
+      cancelSingleFinger();
+      state = 'viewport_gesture';
+      prevTouches = copyTouches(touches);
+      return;
+    }
+
+    // 1本指
+    if (touches.length === 1 && startTouch) {
+      var t = touches[0];
+      var dx = t.clientX - startTouch.clientX;
+      var dy = t.clientY - startTouch.clientY;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (state === 'maybe_tap') {
+        if (dist >= FPE.CONST.DRAG_THRESHOLD) {
+          clearLongPress();
+          state = 'dragging';
+
+          if (!hasFiredMouseDown) {
+            var fakeDown = wrapTouch(startTouch);
+            fakeDown.target = startTouch.target;
+            dispatchToolMouseDown(fakeDown);
+            hasFiredMouseDown = true;
+          }
+
+          // ドラッグは即座にディスパッチ（rAFなし）
+          var fakeMove = wrapTouch(t);
+          dispatchToolMouseMove(fakeMove);
+        }
+      } else if (state === 'dragging') {
+        // ドラッグは即座にディスパッチ（rAFなし）
+        var fakeMove = wrapTouch(t);
+        dispatchToolMouseMove(fakeMove);
+      }
+    }
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    var remaining = e.touches.length;
+
+    if (state === 'viewport_gesture') {
+      if (remaining <= 1) {
+        // 保留中のピンチを即座にフラッシュ
+        flushPinch();
+        state = 'idle';
+        prevTouches = null;
+      }
+      return;
+    }
+
+    if (state === 'maybe_tap') {
+      clearLongPress();
+      state = 'idle';
+
+      var fakeEvent = wrapTouch(startTouch);
+      fakeEvent.target = startTouch.target;
+      dispatchToolMouseDown(fakeEvent);
+      dispatchToolMouseUp(fakeEvent);
+      startTouch = null;
+      return;
+    }
+
+    if (state === 'dragging') {
+      // 保留中のmoveをフラッシュしてからmouseup
+      flushMove();
+      state = 'idle';
+      clearLongPress();
+
+      var ct = e.changedTouches[0];
+      if (ct) {
+        var fakeUp = wrapTouch(ct);
+        dispatchToolMouseUp(fakeUp);
+      }
+      startTouch = null;
+      return;
+    }
+
+    if (state === 'long_press') {
+      state = 'idle';
+      startTouch = null;
+      return;
+    }
+
+    state = 'idle';
+    clearLongPress();
+    startTouch = null;
+  }
+
+  // --- rAF スロットリング ---
+
+  function scheduleRAF() {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(processFrame);
+  }
+
+  function processFrame() {
+    rafPending = false;
+    flushPinch();
+    flushMove();
+  }
+
+  function flushPinch() {
+    if (!pendingPinchTouches || !prevTouches || prevTouches.length < 2) {
+      pendingPinchTouches = null;
+      return;
+    }
+    var cur = pendingPinchTouches;
+    pendingPinchTouches = null;
+
+    if (cur.length < 2) return;
+
+    var t0 = cur[0], t1 = cur[1];
+    var p0 = prevTouches[0], p1 = prevTouches[1];
+
+    var curMidX = (t0.clientX + t1.clientX) / 2;
+    var curMidY = (t0.clientY + t1.clientY) / 2;
+    var prevMidX = (p0.clientX + p1.clientX) / 2;
+    var prevMidY = (p0.clientY + p1.clientY) / 2;
+
+    var dPanX = curMidX - prevMidX;
+    var dPanY = curMidY - prevMidY;
+
+    var curDist = getTouchDist(t0, t1);
+    var prevDist = getTouchDist(p0, p1);
+    var scaleRatio = prevDist > 0 ? curDist / prevDist : 1;
+
+    var pan = FPE.Viewport.getPan();
+    var oldZoom = FPE.Viewport.getZoom();
+    var newZoom = Math.max(
+      FPE.CONST.ZOOM_MIN,
+      Math.min(FPE.CONST.ZOOM_MAX, oldZoom * scaleRatio)
+    );
+
+    var rect = svg.getBoundingClientRect();
+    var mx = curMidX - rect.left;
+    var my = curMidY - rect.top;
+
+    var newPanX = mx - (mx - pan.x) * (newZoom / oldZoom) + dPanX;
+    var newPanY = my - (my - pan.y) * (newZoom / oldZoom) + dPanY;
+
+    // 1回の呼び出しでズーム+パン適用（updateTransform 1回だけ）
+    FPE.Viewport.setZoomAndPan(newZoom, newPanX, newPanY);
+
+    prevTouches = cur;
+  }
+
+  function flushMove() {
+    if (!pendingMoveTouch) return;
+    var t = pendingMoveTouch;
+    pendingMoveTouch = null;
+
+    var fakeMove = wrapTouch(t);
+    dispatchToolMouseMove(fakeMove);
+  }
+
+  // --- ツールハンドラへの委譲 ---
+
+  function dispatchToolMouseDown(e) {
+    if (FPE.Viewport.isSpaceDown()) return;
+    var gridPos = FPE.Viewport.screenToGrid(e.clientX, e.clientY);
+    var tool = FPE.ToolManager.getTool();
+
+    if (tool === 'select' || tool === 'room') {
+      FPE.RoomManager.onMouseDown(e, gridPos);
+    } else if (tool === 'stairs') {
+      FPE.StairsManager.onMouseDown(e, gridPos);
+    } else if (tool === 'boundary') {
+      FPE.BoundaryManager.onMouseDown(e, gridPos);
+    } else if (tool === 'opening') {
+      FPE.WallManager.onWallClick(e, gridPos);
+    }
+  }
+
+  function dispatchToolMouseMove(e) {
+    if (FPE.Viewport.getIsPanning()) return;
+    var gridPos = FPE.Viewport.screenToGrid(e.clientX, e.clientY);
+    var tool = FPE.ToolManager.getTool();
+
+    if (tool === 'room' || tool === 'select') {
+      FPE.RoomManager.onMouseMove(e, gridPos);
+    } else if (tool === 'stairs') {
+      FPE.StairsManager.onMouseMove(e, gridPos);
+    } else if (tool === 'boundary') {
+      FPE.BoundaryManager.onMouseMove(e, gridPos);
+    }
+  }
+
+  function dispatchToolMouseUp(e) {
+    var gridPos = FPE.Viewport.screenToGrid(e.clientX, e.clientY);
+    var tool = FPE.ToolManager.getTool();
+
+    if (tool === 'room' || tool === 'select') {
+      FPE.RoomManager.onMouseUp(e, gridPos);
+    } else if (tool === 'stairs') {
+      FPE.StairsManager.onMouseUp(e, gridPos);
+    } else if (tool === 'boundary') {
+      FPE.BoundaryManager.onMouseUp(e);
+    }
+  }
+
+  // --- ロングプレス ---
+
+  function onLongPress() {
+    // Phase 4で実装予定
+  }
+
+  // --- ユーティリティ ---
+
+  function cancelSingleFinger() {
+    clearLongPress();
+    if (state === 'dragging' && hasFiredMouseDown && startTouch) {
+      var fakeUp = wrapTouch(startTouch);
+      dispatchToolMouseUp(fakeUp);
+    }
+    hasFiredMouseDown = false;
+    startTouch = null;
+    pendingMoveTouch = null;
+  }
+
+  function clearLongPress() {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  }
+
+  function getTouchDist(t0, t1) {
+    var dx = t1.clientX - t0.clientX;
+    var dy = t1.clientY - t0.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function copyTouches(touches) {
+    var arr = [];
+    for (var i = 0; i < touches.length; i++) {
+      arr.push({ clientX: touches[i].clientX, clientY: touches[i].clientY });
+    }
+    return arr;
+  }
+
+  /** タッチジェスチャーが進行中か（マウスイベントとの衝突防止用） */
+  function isTouchActive() {
+    return state !== 'idle';
+  }
+
+  // --- 公開API ---
+
+  return {
+    init: init,
+    isTouchDevice: function () { return _isTouchDevice; },
+    isTouchActive: isTouchActive,
+    isMultiSelectMode: function () { return _multiSelectMode; },
+    setMultiSelectMode: function (v) { _multiSelectMode = !!v; },
+    isFreeSnap: function () { return _freeSnap; },
+    setFreeSnap: function (v) { _freeSnap = !!v; },
   };
 })();
 // grid-renderer.js - SVGグリッド描画
@@ -837,7 +1141,9 @@ FPE.SelectionManager = (function () {
 
     var layer = document.getElementById('layer-handles');
     var G = FPE.CONST.GRID_PX;
-    var hs = FPE.CONST.HANDLE_SIZE;
+    var isTouch = FPE.TouchManager && FPE.TouchManager.isTouchDevice();
+    var hs = isTouch ? FPE.CONST.HANDLE_SIZE_TOUCH : FPE.CONST.HANDLE_SIZE;
+    var hitArea = isTouch ? FPE.CONST.HANDLE_HIT_AREA : 0;
 
     room.parts.forEach(function (part, partIndex) {
       var px = part.x * G;
@@ -856,36 +1162,54 @@ FPE.SelectionManager = (function () {
         { cx: px + pw,   cy: py + ph,   cursor: 'se-resize', dir: 'se' },
       ];
 
-      var touchSize = 32; // タッチ用の大きいヒット領域
       positions.forEach(function (p) {
-        // 透明な大きいタッチターゲット（下に配置）
-        var touchRect = FPE.GridRenderer.createSVG('rect', {
-          x: p.cx - touchSize/2, y: p.cy - touchSize/2,
-          width: touchSize, height: touchSize,
-          fill: 'transparent',
-          'pointer-events': 'all',
-          cursor: p.cursor,
-          'data-handle': p.dir,
-          'data-room-id': id,
-          'data-part-index': partIndex,
-        });
-        touchRect.classList.add('resize-handle-touch');
-        layer.appendChild(touchRect);
-        handles.push(touchRect);
+        // タッチ時: 大きめ透明円（当たり判定用）
+        if (isTouch && hitArea > 0) {
+          var hitCircle = FPE.GridRenderer.createSVG('circle', {
+            cx: p.cx, cy: p.cy,
+            r: hitArea / 2,
+            fill: 'transparent',
+            'pointer-events': 'all',
+            cursor: p.cursor,
+            'data-handle': p.dir,
+            'data-room-id': id,
+            'data-part-index': partIndex,
+          });
+          hitCircle.classList.add('resize-handle');
+          layer.appendChild(hitCircle);
+          handles.push(hitCircle);
+        }
 
-        // 見える小さいハンドル（上に配置）
-        var rect = FPE.GridRenderer.createSVG('rect', {
-          x: p.cx - hs/2, y: p.cy - hs/2,
-          width: hs, height: hs,
-          fill: '#fff', stroke: FPE.CONST.COLOR_HANDLE, 'stroke-width': 2,
-          cursor: p.cursor,
-          'data-handle': p.dir,
-          'data-room-id': id,
-          'data-part-index': partIndex,
-        });
-        rect.classList.add('resize-handle');
-        layer.appendChild(rect);
-        handles.push(rect);
+        if (isTouch) {
+          // タッチ時: 見える円ハンドル
+          var circle = FPE.GridRenderer.createSVG('circle', {
+            cx: p.cx, cy: p.cy,
+            r: hs / 2,
+            fill: '#fff', stroke: FPE.CONST.COLOR_HANDLE, 'stroke-width': 2,
+            cursor: p.cursor,
+            'data-handle': p.dir,
+            'data-room-id': id,
+            'data-part-index': partIndex,
+            'pointer-events': 'none',  // 当たり判定はhitCircleに任せる
+          });
+          circle.classList.add('resize-handle-visual');
+          layer.appendChild(circle);
+          handles.push(circle);
+        } else {
+          // PC時: 従来の矩形ハンドル
+          var rect = FPE.GridRenderer.createSVG('rect', {
+            x: p.cx - hs/2, y: p.cy - hs/2,
+            width: hs, height: hs,
+            fill: '#fff', stroke: FPE.CONST.COLOR_HANDLE, 'stroke-width': 2,
+            cursor: p.cursor,
+            'data-handle': p.dir,
+            'data-room-id': id,
+            'data-part-index': partIndex,
+          });
+          rect.classList.add('resize-handle');
+          layer.appendChild(rect);
+          handles.push(rect);
+        }
       });
     });
   }
@@ -912,6 +1236,9 @@ FPE.SelectionManager = (function () {
 
   // --- プロパティパネル ---
   function updatePropertyPanel() {
+    // タッチUI: コンテキストアクションバー更新
+    if (FPE.UI && FPE.UI.updateContextBar) FPE.UI.updateContextBar();
+
     var panel = document.getElementById('property-panel-content');
     if (!panel) return;
 
@@ -1330,6 +1657,7 @@ FPE.RoomManager = (function () {
       'text-anchor': 'middle', 'dominant-baseline': 'auto',
       'font-size': 13, 'font-weight': 'bold',
       fill: '#333', 'pointer-events': 'none',
+      'data-room-id': room.id,
     });
     nameLabel.textContent = room.name;
     layerLabels.appendChild(nameLabel);
@@ -1339,6 +1667,7 @@ FPE.RoomManager = (function () {
       'text-anchor': 'middle', 'dominant-baseline': 'auto',
       'font-size': 11,
       fill: '#666', 'pointer-events': 'none',
+      'data-room-id': room.id,
     });
     tatamiLabel.textContent = FPE.Format.formatFixed1(tatami) + '帖';
     layerLabels.appendChild(tatamiLabel);
@@ -1352,6 +1681,7 @@ FPE.RoomManager = (function () {
         'text-anchor': 'middle', 'dominant-baseline': 'auto',
         'font-size': 10,
         fill: '#999', 'pointer-events': 'none',
+        'data-room-id': room.id,
       });
       mmLabel.textContent = FPE.Format.formatFixed2(totalW_mm) + '×' + FPE.Format.formatFixed2(totalH_mm) + 'mm';
       layerLabels.appendChild(mmLabel);
@@ -1368,6 +1698,7 @@ FPE.RoomManager = (function () {
           'text-anchor': 'middle', 'dominant-baseline': 'auto',
           'font-size': 9,
           fill: '#aaa', 'pointer-events': 'none',
+          'data-room-id': room.id,
         });
         partLabel.textContent = FPE.Format.formatFixed2(pw_mm) + '×' + FPE.Format.formatFixed2(ph_mm);
         layerLabels.appendChild(partLabel);
@@ -1502,7 +1833,7 @@ FPE.RoomManager = (function () {
   // --- 移動開始: 全選択オブジェクトの元座標を保存 ---
   function startBatchMove(gridPos) {
     isDraggingMove = true;
-    moveStart = FPE.Snap.point(gridPos.x, gridPos.y);
+    moveStart = { x: gridPos.x, y: gridPos.y };
     moveIds = FPE.SelectionManager.getSelectedIds();
     moveOrigData = {};
 
@@ -1539,8 +1870,8 @@ FPE.RoomManager = (function () {
     }
 
     if (tool === 'select') {
-      // ハンドルチェック（タッチ用の大きい透明領域も含む）
-      if (e.target.dataset && e.target.dataset.handle) {
+      // ハンドルチェック
+      if (e.target.classList.contains('resize-handle')) {
         isDraggingResize = true;
         resizeDir = e.target.dataset.handle;
         resizeRoomId = e.target.dataset.roomId;
@@ -1548,14 +1879,18 @@ FPE.RoomManager = (function () {
         var room = FPE.DataModel.findRoom(resizeRoomId);
         var part = room.parts[resizePartIndex];
         resizeOrigBounds = { x: part.x, y: part.y, width: part.width, height: part.height };
-        moveStart = FPE.Snap.point(gridPos.x, gridPos.y);
+        moveStart = { x: gridPos.x, y: gridPos.y };
         return;
       }
 
-      // 部屋クリック
+      // 部屋クリック（room-shape または data-room-id 付きラベル）
+      var roomId = null;
       if (e.target.classList.contains('room-shape')) {
-        var roomId = e.target.dataset.roomId;
-
+        roomId = e.target.dataset.roomId;
+      } else if (e.target.dataset && e.target.dataset.roomId) {
+        roomId = e.target.dataset.roomId;
+      }
+      if (roomId) {
         if (e.ctrlKey || e.metaKey) {
           // Ctrl+Click: トグル追加/除外
           FPE.SelectionManager.addToSelection(roomId, 'room');
@@ -1614,34 +1949,26 @@ FPE.RoomManager = (function () {
     }
 
     if (isDraggingMove) {
-      var snapped = FPE.Snap.point(gridPos.x, gridPos.y);
-      var dx = snapped.x - moveStart.x;
-      var dy = snapped.y - moveStart.y;
+      var dx = gridPos.x - moveStart.x;
+      var dy = gridPos.y - moveStart.y;
+      var G = FPE.CONST.GRID_PX;
+      var dxPx = dx * G;
+      var dyPx = dy * G;
 
+      // データモデル更新なし・再描画なし — SVG transform だけ更新（高速）
+      var tr = 'translate(' + dxPx + ',' + dyPx + ')';
       moveIds.forEach(function (id) {
         var orig = moveOrigData[id];
         if (!orig) return;
-        if (orig.type === 'room') {
-          var room = FPE.DataModel.findRoom(id);
-          if (room) {
-            room.parts.forEach(function (p, i) {
-              p.x = orig.parts[i].x + dx;
-              p.y = orig.parts[i].y + dy;
-            });
-          }
-        } else if (orig.type === 'stairs') {
-          var s = FPE.DataModel.findStairs(id);
-          if (s) {
-            s.x = orig.x + dx;
-            s.y = orig.y + dy;
-          }
-        }
+        var selector = orig.type === 'room'
+          ? '[data-room-id="' + id + '"]'
+          : '[data-stairs-id="' + id + '"]';
+        var els = document.querySelectorAll(selector);
+        for (var i = 0; i < els.length; i++) els[i].setAttribute('transform', tr);
       });
-
-      render();
-      FPE.StairsManager.render();
-      FPE.SelectionManager.renderHandles();
-      FPE.SelectionManager.updatePropertyPanel();
+      // ハンドルも移動
+      var handleLayer = document.getElementById('layer-handles');
+      if (handleLayer) handleLayer.setAttribute('transform', tr);
       return;
     }
 
@@ -1691,6 +2018,48 @@ FPE.RoomManager = (function () {
 
     if (isDraggingMove) {
       isDraggingMove = false;
+
+      // transform をリセット
+      moveIds.forEach(function (id) {
+        var orig = moveOrigData[id];
+        if (!orig) return;
+        var selector = orig.type === 'room'
+          ? '[data-room-id="' + id + '"]'
+          : '[data-stairs-id="' + id + '"]';
+        var els = document.querySelectorAll(selector);
+        for (var i = 0; i < els.length; i++) els[i].removeAttribute('transform');
+      });
+      var handleLayer = document.getElementById('layer-handles');
+      if (handleLayer) handleLayer.removeAttribute('transform');
+
+      // データモデルに最終位置を反映（スナップ付き）
+      var dx = gridPos.x - moveStart.x;
+      var dy = gridPos.y - moveStart.y;
+      var types = FPE.SelectionManager.getSelectedTypes();
+      moveIds.forEach(function (id) {
+        var orig = moveOrigData[id];
+        if (!orig) return;
+        if (orig.type === 'room') {
+          var room = FPE.DataModel.findRoom(id);
+          if (room) {
+            room.parts.forEach(function (p, i) {
+              p.x = FPE.Snap.toGrid(orig.parts[i].x + dx);
+              p.y = FPE.Snap.toGrid(orig.parts[i].y + dy);
+            });
+          }
+        } else if (orig.type === 'stairs') {
+          var s = FPE.DataModel.findStairs(id);
+          if (s) {
+            s.x = FPE.Snap.toGrid(orig.x + dx);
+            s.y = FPE.Snap.toGrid(orig.y + dy);
+          }
+        }
+      });
+
+      render();
+      FPE.StairsManager.render();
+      FPE.SelectionManager.renderHandles();
+      FPE.SelectionManager.updatePropertyPanel();
       moveIds = [];
       moveOrigData = {};
       if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
@@ -1700,6 +2069,23 @@ FPE.RoomManager = (function () {
 
     if (isDraggingResize) {
       isDraggingResize = false;
+      // ハンドル再表示
+      var hl = document.getElementById('layer-handles');
+      if (hl) hl.style.display = '';
+      // 最終サイズをグリッドにスナップ
+      var room = FPE.DataModel.findRoom(resizeRoomId);
+      if (room) {
+        var p = room.parts[resizePartIndex];
+        if (p) {
+          p.x = FPE.Snap.toGrid(p.x);
+          p.y = FPE.Snap.toGrid(p.y);
+          p.width = FPE.Snap.size(p.width);
+          p.height = FPE.Snap.size(p.height);
+        }
+        render();
+        FPE.SelectionManager.renderHandles();
+        FPE.SelectionManager.updatePropertyPanel();
+      }
       resizeRoomId = null;
       if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
       if (FPE.WallManager) FPE.WallManager.generateWalls();
@@ -1736,14 +2122,11 @@ FPE.RoomManager = (function () {
           if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
           if (FPE.WallManager) FPE.WallManager.generateWalls();
         }
-        isAddingPart = false;
-        addPartRoomId = null;
-        FPE.ToolManager.setTool('select');
-      } else {
-        // ドラッグが小さすぎた → モード維持して再試行可能に
-        dragStart = null;
       }
+      isAddingPart = false;
+      addPartRoomId = null;
       clearPreview();
+      FPE.ToolManager.setTool('select');
       return;
     }
   }
@@ -1817,7 +2200,6 @@ FPE.RoomManager = (function () {
   }
 
   function handleResize(gridPos) {
-    var snapped = FPE.Snap.point(gridPos.x, gridPos.y);
     var room = FPE.DataModel.findRoom(resizeRoomId);
     if (!room) return;
     var p = room.parts[resizePartIndex];
@@ -1829,28 +2211,40 @@ FPE.RoomManager = (function () {
     var newX = p.x, newY = p.y, newW = p.width, newH = p.height;
 
     if (dir.includes('w')) {
-      newX = Math.min(snapped.x, orig.x + orig.width - 0.5);
+      newX = Math.min(gridPos.x, orig.x + orig.width - 0.5);
       newW = orig.x + orig.width - newX;
     }
     if (dir.includes('e')) {
-      newW = Math.max(0.5, snapped.x - orig.x);
+      newW = Math.max(0.5, gridPos.x - orig.x);
     }
     if (dir.includes('n')) {
-      newY = Math.min(snapped.y, orig.y + orig.height - 0.5);
+      newY = Math.min(gridPos.y, orig.y + orig.height - 0.5);
       newH = orig.y + orig.height - newY;
     }
     if (dir.includes('s')) {
-      newH = Math.max(0.5, snapped.y - orig.y);
+      newH = Math.max(0.5, gridPos.y - orig.y);
     }
 
-    p.x = FPE.Snap.toGrid(newX);
-    p.y = FPE.Snap.toGrid(newY);
-    p.width = FPE.Snap.size(newW);
-    p.height = FPE.Snap.size(newH);
+    p.x = newX;
+    p.y = newY;
+    p.width = Math.max(0.25, newW);
+    p.height = Math.max(0.25, newH);
 
-    render();
-    FPE.SelectionManager.renderHandles();
-    FPE.SelectionManager.updatePropertyPanel();
+    // 軽量更新: SVG属性だけ更新（再描画なし・ハンドル非表示）
+    var G = FPE.CONST.GRID_PX;
+    var roomEl = document.querySelector('.room-shape[data-room-id="' + resizeRoomId + '"]');
+    if (roomEl && roomEl.tagName === 'rect') {
+      roomEl.setAttribute('x', p.x * G);
+      roomEl.setAttribute('y', p.y * G);
+      roomEl.setAttribute('width', p.width * G);
+      roomEl.setAttribute('height', p.height * G);
+    } else if (roomEl && roomEl.tagName === 'path') {
+      var room = FPE.DataModel.findRoom(resizeRoomId);
+      if (room) roomEl.setAttribute('d', computeOuterPath(room.parts));
+    }
+    // ハンドルはリサイズ中非表示（毎フレームの再作成を避ける）
+    var hl = document.getElementById('layer-handles');
+    if (hl) hl.style.display = 'none';
   }
 
   // --- プレビュー描画 ---
@@ -2390,9 +2784,45 @@ FPE.WallManager = (function () {
     });
     if (!opening) return;
 
+    // タッチ時: コンテキストメニューで操作選択
+    if (FPE.TouchManager && FPE.TouchManager.isTouchDevice() && FPE.UI.showContextMenu) {
+      FPE.UI.showContextMenu(e.clientX, e.clientY, [
+        {
+          label: '開き方向を反転',
+          action: function () {
+            opening.swing = opening.swing === 'left' ? 'right' : 'left';
+            FPE.DataModel.emit('walls-updated');
+            if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+            renderWalls();
+          },
+        },
+        {
+          label: 'ヒンジを反転',
+          action: function () {
+            opening.hinge = (opening.hinge || 'start') === 'start' ? 'end' : 'start';
+            FPE.DataModel.emit('walls-updated');
+            if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+            renderWalls();
+          },
+        },
+        {
+          label: '削除',
+          danger: true,
+          action: function () {
+            var idx = wall.openings.indexOf(opening);
+            if (idx >= 0) wall.openings.splice(idx, 1);
+            FPE.DataModel.emit('walls-updated');
+            if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+            renderWalls();
+          },
+        },
+      ]);
+      return;
+    }
+
+    // PC: 従来の修飾キー操作
     var isDoubleClick = (typeof e.detail === 'number' && e.detail >= 2);
     if (e.shiftKey || e.altKey || isDoubleClick) {
-      // Shift+クリック → ドア削除
       var idx = wall.openings.indexOf(opening);
       if (idx >= 0) wall.openings.splice(idx, 1);
       FPE.DataModel.emit('walls-updated');
@@ -2402,10 +2832,8 @@ FPE.WallManager = (function () {
     }
 
     if (e.ctrlKey || e.metaKey) {
-      // Ctrl+クリック → ヒンジ位置反転
       opening.hinge = (opening.hinge || 'start') === 'start' ? 'end' : 'start';
     } else {
-      // クリック → swing方向反転
       opening.swing = opening.swing === 'left' ? 'right' : 'left';
     }
 
@@ -2414,7 +2842,7 @@ FPE.WallManager = (function () {
     renderWalls();
   }
 
-  /** 既存窓クリック: クリック→削除 */
+  /** 既存窓クリック: PC→削除, タッチ→メニュー */
   function handleWindowClick(hitEl, e) {
     var wallId = hitEl.dataset.wallId;
     var openingPos = parseFloat(hitEl.dataset.openingPos);
@@ -2426,6 +2854,25 @@ FPE.WallManager = (function () {
     });
     if (!opening) return;
 
+    // タッチ時: 確認メニュー
+    if (FPE.TouchManager && FPE.TouchManager.isTouchDevice() && FPE.UI.showContextMenu) {
+      FPE.UI.showContextMenu(e.clientX, e.clientY, [
+        {
+          label: '窓を削除',
+          danger: true,
+          action: function () {
+            var idx = wall.openings.indexOf(opening);
+            if (idx >= 0) wall.openings.splice(idx, 1);
+            FPE.DataModel.emit('walls-updated');
+            if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+            renderWalls();
+          },
+        },
+      ]);
+      return;
+    }
+
+    // PC: 即削除
     var idx = wall.openings.indexOf(opening);
     if (idx >= 0) wall.openings.splice(idx, 1);
 
@@ -3179,6 +3626,12 @@ FPE.UI = (function () {
     bindSVGEvents();
     buildPresetPanel();
     bindProjectName();
+    // タッチUI
+    if (FPE.TouchManager && FPE.TouchManager.isTouchDevice()) {
+      bindBottomToolbar();
+      bindContextActionBar();
+      buildPresetSheet();
+    }
   }
 
   function bindToolButtons() {
@@ -3257,6 +3710,8 @@ FPE.UI = (function () {
 
   function bindSVGEvents() {
     svg.addEventListener('mousedown', function (e) {
+      // タッチ操作中はマウスイベントを無視（二重発火防止）
+      if (FPE.TouchManager && FPE.TouchManager.isTouchActive()) return;
       if (FPE.Viewport.isSpaceDown() || e.button === 1) return;
       if (e.button !== 0) return;
       var gridPos = FPE.Viewport.screenToGrid(e.clientX, e.clientY);
@@ -3277,6 +3732,7 @@ FPE.UI = (function () {
     });
 
     svg.addEventListener('mousemove', function (e) {
+      if (FPE.TouchManager && FPE.TouchManager.isTouchActive()) return;
       if (FPE.Viewport.getIsPanning()) return;
       var gridPos = FPE.Viewport.screenToGrid(e.clientX, e.clientY);
       var tool = FPE.ToolManager.getTool();
@@ -3291,6 +3747,7 @@ FPE.UI = (function () {
     });
 
     svg.addEventListener('mouseup', function (e) {
+      if (FPE.TouchManager && FPE.TouchManager.isTouchActive()) return;
       if (e.button !== 0) return;
       var gridPos = FPE.Viewport.screenToGrid(e.clientX, e.clientY);
       var tool = FPE.ToolManager.getTool();
@@ -3304,98 +3761,6 @@ FPE.UI = (function () {
       }
     });
 
-    // --- タッチイベント → 既存マウスハンドラ委譲 ---
-    // TouchEvent を MouseEvent 互換のオブジェクトにラップ
-    function wrapTouch(touchEvent, touch) {
-      return {
-        button: 0,
-        clientX: touch.clientX,
-        clientY: touch.clientY,
-        target: touch.target,
-        ctrlKey: touchEvent.ctrlKey || false,
-        altKey: touchEvent.altKey || false,
-        shiftKey: touchEvent.shiftKey || false,
-        metaKey: touchEvent.metaKey || false,
-        preventDefault: function () { touchEvent.preventDefault(); },
-        stopPropagation: function () { touchEvent.stopPropagation(); }
-      };
-    }
-
-    // タッチドラッグ閾値（指の微小な動きで誤操作しないようにする）
-    var touchDragStartX = 0;
-    var touchDragStartY = 0;
-    var touchDragThresholdMet = false;
-    var TOUCH_DRAG_THRESHOLD = 10; // ピクセル
-
-    svg.addEventListener('touchstart', function (e) {
-      if (e.touches.length !== 1) return; // 2本指以上は viewport.js に任せる
-      e.preventDefault();
-      var touch = e.touches[0];
-      touchDragStartX = touch.clientX;
-      touchDragStartY = touch.clientY;
-      touchDragThresholdMet = false;
-      if (FPE.Viewport.isSpaceDown()) return;
-      var me = wrapTouch(e, touch);
-      var gridPos = FPE.Viewport.screenToGrid(touch.clientX, touch.clientY);
-      var tool = FPE.ToolManager.getTool();
-
-      if (tool === 'select') {
-        FPE.RoomManager.onMouseDown(me, gridPos);
-      } else if (tool === 'room') {
-        FPE.RoomManager.onMouseDown(me, gridPos);
-      } else if (tool === 'stairs') {
-        FPE.StairsManager.onMouseDown(me, gridPos);
-      } else if (tool === 'boundary') {
-        FPE.BoundaryManager.onMouseDown(me, gridPos);
-      } else if (tool === 'opening') {
-        FPE.WallManager.onWallClick(me, gridPos);
-      }
-    }, { passive: false });
-
-    svg.addEventListener('touchmove', function (e) {
-      if (e.touches.length !== 1) return;
-      e.preventDefault();
-      if (FPE.Viewport.getIsPanning()) return;
-      var touch = e.touches[0];
-
-      // ドラッグ閾値チェック: 指が十分動くまで無視
-      if (!touchDragThresholdMet) {
-        var tdx = touch.clientX - touchDragStartX;
-        var tdy = touch.clientY - touchDragStartY;
-        if (tdx * tdx + tdy * tdy < TOUCH_DRAG_THRESHOLD * TOUCH_DRAG_THRESHOLD) return;
-        touchDragThresholdMet = true;
-      }
-
-      var me = wrapTouch(e, touch);
-      var gridPos = FPE.Viewport.screenToGrid(touch.clientX, touch.clientY);
-      var tool = FPE.ToolManager.getTool();
-
-      if (tool === 'room' || tool === 'select') {
-        FPE.RoomManager.onMouseMove(me, gridPos);
-      } else if (tool === 'stairs') {
-        FPE.StairsManager.onMouseMove(me, gridPos);
-      } else if (tool === 'boundary') {
-        FPE.BoundaryManager.onMouseMove(me, gridPos);
-      }
-    }, { passive: false });
-
-    svg.addEventListener('touchend', function (e) {
-      if (e.touches.length > 0) return; // まだ指が残っている場合は無視
-      if (e.changedTouches.length === 0) return;
-      var touch = e.changedTouches[0];
-      var me = wrapTouch(e, touch);
-      var gridPos = FPE.Viewport.screenToGrid(touch.clientX, touch.clientY);
-      var tool = FPE.ToolManager.getTool();
-
-      if (tool === 'room' || tool === 'select') {
-        FPE.RoomManager.onMouseUp(me, gridPos);
-      } else if (tool === 'stairs') {
-        FPE.StairsManager.onMouseUp(me, gridPos);
-      } else if (tool === 'boundary') {
-        FPE.BoundaryManager.onMouseUp(me);
-      }
-    }, { passive: false });
-
     // Delete/Backspace で選択中オブジェクトを一括削除
     window.addEventListener('keydown', function (e) {
       var tag = e.target && e.target.tagName ? String(e.target.tagName).toUpperCase() : '';
@@ -3406,140 +3771,21 @@ FPE.UI = (function () {
 
       // Ctrl+C: コピー
       if (isCtrl && key === 'c') {
-        var count = FPE.SelectionManager.getSelectedCount();
-        if (count === 0) return;
-
-        var selectedIds = FPE.SelectionManager.getSelectedIds();
-        var selectedTypes = FPE.SelectionManager.getSelectedTypes();
-
-        var minX = Infinity;
-        var minY = Infinity;
-
-        var items = [];
-
-        selectedIds.forEach(function (id) {
-          var type = selectedTypes[id];
-          if (type === 'room') {
-            var room = FPE.DataModel.findRoom(id);
-            if (!room) return;
-            var bounds = FPE.SelectionManager.getRoomBounds(room);
-            minX = Math.min(minX, bounds.x);
-            minY = Math.min(minY, bounds.y);
-
-            items.push({
-              type: 'room',
-              data: {
-                name: room.name,
-                color: room.color,
-                parts: JSON.parse(JSON.stringify(room.parts || [])),
-              },
-            });
-          } else if (type === 'stairs') {
-            var s = FPE.DataModel.findStairs(id);
-            if (!s) return;
-            minX = Math.min(minX, s.x);
-            minY = Math.min(minY, s.y);
-
-            items.push({
-              type: 'stairs',
-              data: {
-                x: s.x,
-                y: s.y,
-                width: s.width,
-                height: s.height,
-                direction: s.direction,
-                stairType: s.stairType,
-                rotation: s.rotation,
-                // コピー時はリンクを維持しない（再作成時にID衝突/不整合を避ける）
-                linkedStairsId: null,
-              },
-            });
-          }
-        });
-
-        if (items.length === 0) return;
-
-        objectClipboard = {
-          bounds: { minX: minX, minY: minY },
-          items: items,
-        };
+        doCopy();
         e.preventDefault();
         return;
       }
 
       // Ctrl+V: ペースト
       if (isCtrl && key === 'v') {
-        if (!objectClipboard) return;
-
-        var cursor = FPE.Viewport.getLastCursorGrid ? FPE.Viewport.getLastCursorGrid() : { x: 0, y: 0 };
-        var snapped = FPE.Snap.point(cursor.x, cursor.y);
-        var deltaX = snapped.x - objectClipboard.bounds.minX;
-        var deltaY = snapped.y - objectClipboard.bounds.minY;
-
-        var newSelected = [];
-        var hasRoom = false;
-
-        objectClipboard.items.forEach(function (it) {
-          if (it.type === 'room') {
-            hasRoom = true;
-            var roomData = JSON.parse(JSON.stringify(it.data));
-            roomData.parts.forEach(function (p) {
-              p.x = FPE.Snap.toGrid(p.x + deltaX);
-              p.y = FPE.Snap.toGrid(p.y + deltaY);
-            });
-            var addedRoom = FPE.DataModel.addRoom(roomData);
-            newSelected.push({ id: addedRoom.id, type: 'room' });
-          } else if (it.type === 'stairs') {
-            var stairsData = JSON.parse(JSON.stringify(it.data));
-            stairsData.x = FPE.Snap.toGrid(stairsData.x + deltaX);
-            stairsData.y = FPE.Snap.toGrid(stairsData.y + deltaY);
-            var addedStairs = FPE.DataModel.addStairs(stairsData);
-            newSelected.push({ id: addedStairs.id, type: 'stairs' });
-          }
-        });
-
-        if (newSelected.length === 0) return;
-
-        FPE.SelectionManager.selectMultiple(newSelected);
-        FPE.ToolManager.setTool('select');
-        FPE.RoomManager.render();
-        FPE.StairsManager.render();
-        if (FPE.WallManager) {
-          if (hasRoom) FPE.WallManager.generateWalls();
-          else FPE.WallManager.renderWalls();
-        }
-        if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
-
+        doPaste();
         e.preventDefault();
         return;
       }
 
       // Delete/Backspace: 選択中オブジェクト削除
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        var count = FPE.SelectionManager.getSelectedCount();
-        if (count === 0) return;
-
-        if (count > 1) {
-          // 複数選択 → 一括削除
-          FPE.SelectionManager.deleteAllSelected();
-        } else {
-          // 単一選択 → 従来通り
-          var id = FPE.SelectionManager.getSelectedId();
-          var type = FPE.SelectionManager.getSelectedType();
-          if (!id) return;
-          if (type === 'room') {
-            FPE.DataModel.removeRoom(id);
-            FPE.SelectionManager.deselect();
-            FPE.RoomManager.render();
-            if (FPE.WallManager) FPE.WallManager.generateWalls();
-            if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
-          } else if (type === 'stairs') {
-            FPE.DataModel.removeStairs(id);
-            FPE.SelectionManager.deselect();
-            FPE.StairsManager.render();
-            if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
-          }
-        }
+        doDelete();
       }
     });
   }
@@ -3568,8 +3814,447 @@ FPE.UI = (function () {
     });
   }
 
+  // === タッチUI ===
+
+  function bindBottomToolbar() {
+    // ツールボタン
+    var btBtns = document.querySelectorAll('.bt-btn[data-tool]');
+    btBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tool = btn.dataset.tool;
+        if (tool) FPE.ToolManager.setTool(tool);
+        // active表示更新
+        btBtns.forEach(function (b) { b.classList.toggle('active', b === btn); });
+        // 左サイドバーのtool-btnも同期
+        document.querySelectorAll('.tool-btn').forEach(function (b) {
+          b.classList.toggle('active', b.dataset.tool === tool);
+        });
+        // opening サブモード表示切替
+        var submode = document.getElementById('bt-submode-opening');
+        if (submode) submode.style.display = (tool === 'opening') ? 'flex' : 'none';
+      });
+    });
+
+    // 窓/ドアサブモード（タッチ用）
+    var btSubBtns = document.querySelectorAll('.bt-sub-btn');
+    btSubBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        FPE.ToolManager.setSubMode(btn.dataset.submode);
+        btSubBtns.forEach(function (b) { b.classList.toggle('active', b === btn); });
+        // 左サイドバーのsub-mode-btnも同期
+        document.querySelectorAll('.sub-mode-btn').forEach(function (b) {
+          b.classList.toggle('active', b.dataset.submode === btn.dataset.submode);
+        });
+      });
+    });
+
+    // 保存/読込
+    var btSave = document.getElementById('bt-save');
+    var btLoad = document.getElementById('bt-load');
+    if (btSave) btSave.addEventListener('click', function () { FPE.FileIO.save(); });
+    if (btLoad) btLoad.addEventListener('click', function () { FPE.FileIO.load(); });
+
+    // プリセットシート開閉
+    var btPreset = document.getElementById('bt-preset');
+    var presetOverlay = document.getElementById('preset-sheet-overlay');
+    if (btPreset && presetOverlay) {
+      btPreset.addEventListener('click', function () {
+        presetOverlay.classList.add('visible');
+        presetOverlay.style.display = 'flex';
+      });
+      presetOverlay.addEventListener('click', function (e) {
+        if (e.target === presetOverlay) {
+          presetOverlay.classList.remove('visible');
+          presetOverlay.style.display = 'none';
+        }
+      });
+    }
+
+    // ToolManager.setTool のフックでボトムツールバーのactive同期
+    var origSetTool = FPE.ToolManager.setTool;
+    FPE.ToolManager.setTool = function (tool) {
+      origSetTool(tool);
+      btBtns.forEach(function (b) { b.classList.toggle('active', b.dataset.tool === tool); });
+      var submode = document.getElementById('bt-submode-opening');
+      if (submode) submode.style.display = (tool === 'opening') ? 'flex' : 'none';
+      updateContextBar();
+    };
+  }
+
+  function bindContextActionBar() {
+    var bar = document.getElementById('context-action-bar');
+    if (!bar) return;
+
+    // コピー
+    document.getElementById('ca-copy').addEventListener('click', function () {
+      doCopy();
+    });
+
+    // ペースト
+    document.getElementById('ca-paste').addEventListener('click', function () {
+      doPaste();
+    });
+
+    // 削除
+    document.getElementById('ca-delete').addEventListener('click', function () {
+      doDelete();
+    });
+
+    // プロパティシート
+    document.getElementById('ca-props').addEventListener('click', function () {
+      showPropertySheet();
+    });
+
+    // 複数選択トグル
+    var msBtn = document.getElementById('ca-multiselect');
+    msBtn.addEventListener('click', function () {
+      var cur = FPE.TouchManager.isMultiSelectMode();
+      FPE.TouchManager.setMultiSelectMode(!cur);
+      msBtn.classList.toggle('active', !cur);
+    });
+  }
+
+  function showPropertySheet() {
+    var overlay = document.getElementById('property-sheet-overlay');
+    var content = document.getElementById('property-sheet-content');
+    if (!overlay || !content) return;
+
+    // PC用パネルの内容をコピーしてタッチ用シートに反映
+    var pcPanel = document.getElementById('property-panel-content');
+    if (pcPanel) {
+      content.innerHTML = pcPanel.innerHTML;
+      // イベントの再バインド（innerHTML コピーではイベントが付かないため）
+      rebindPropertySheetEvents(content);
+    }
+
+    overlay.classList.add('visible');
+    overlay.style.display = 'flex';
+    overlay.addEventListener('click', function handler(ev) {
+      if (ev.target === overlay) {
+        overlay.classList.remove('visible');
+        overlay.style.display = 'none';
+        overlay.removeEventListener('click', handler);
+      }
+    });
+  }
+
+  function rebindPropertySheetEvents(container) {
+    var id = FPE.SelectionManager.getSelectedId();
+    var type = FPE.SelectionManager.getSelectedType();
+    if (!id) return;
+
+    if (type === 'room') {
+      var nameInput = container.querySelector('#prop-name');
+      if (nameInput) {
+        nameInput.id = 'prop-name-sheet';
+        nameInput.addEventListener('change', function (ev) {
+          FPE.DataModel.updateRoom(id, { name: ev.target.value });
+          if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+          FPE.RoomManager.render();
+        });
+      }
+      var colorInput = container.querySelector('#prop-color');
+      if (colorInput) {
+        colorInput.id = 'prop-color-sheet';
+        colorInput.addEventListener('input', function (ev) {
+          FPE.DataModel.updateRoom(id, { color: ev.target.value });
+          FPE.RoomManager.render();
+        });
+        colorInput.addEventListener('change', function () {
+          if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+        });
+      }
+      var deleteBtn = container.querySelector('#btn-delete-room');
+      if (deleteBtn) {
+        deleteBtn.id = 'btn-delete-room-sheet';
+        deleteBtn.addEventListener('click', function () {
+          FPE.DataModel.removeRoom(id);
+          FPE.SelectionManager.deselect();
+          if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+          FPE.RoomManager.render();
+          if (FPE.WallManager) FPE.WallManager.generateWalls();
+          closePropertySheet();
+        });
+      }
+      var addPartBtn = container.querySelector('#btn-add-part');
+      if (addPartBtn) {
+        addPartBtn.id = 'btn-add-part-sheet';
+        addPartBtn.addEventListener('click', function () {
+          if (FPE.RoomManager) FPE.RoomManager.startAddPart(id);
+          closePropertySheet();
+        });
+      }
+      // パーツ削除ボタン
+      container.querySelectorAll('.btn-delete-part').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var partIdx = parseInt(btn.dataset.partIndex);
+          var room = FPE.DataModel.findRoom(id);
+          if (!room || room.parts.length <= 1) return;
+          room.parts.splice(partIdx, 1);
+          FPE.DataModel.updateRoom(id, { parts: room.parts });
+          FPE.RoomManager.render();
+          FPE.SelectionManager.renderHandles();
+          FPE.SelectionManager.updatePropertyPanel();
+          if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+          if (FPE.WallManager) FPE.WallManager.generateWalls();
+          closePropertySheet();
+        });
+      });
+    } else if (type === 'stairs') {
+      var typeSelect = container.querySelector('#prop-stair-type');
+      if (typeSelect) {
+        typeSelect.id = 'prop-stair-type-sheet';
+        typeSelect.addEventListener('change', function (ev) {
+          FPE.DataModel.updateStairs(id, { stairType: ev.target.value });
+          FPE.StairsManager.render();
+          FPE.SelectionManager.renderHandles();
+          if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+        });
+      }
+      var rotateBtn = container.querySelector('#btn-rotate-stairs');
+      if (rotateBtn) {
+        rotateBtn.id = 'btn-rotate-stairs-sheet';
+        rotateBtn.addEventListener('click', function () {
+          var s = FPE.DataModel.findStairs(id);
+          var newR = ((s.rotation || 0) + 90) % 360;
+          FPE.DataModel.updateStairs(id, { rotation: newR });
+          FPE.StairsManager.render();
+          if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+        });
+      }
+      var dirBtn = container.querySelector('#btn-toggle-dir');
+      if (dirBtn) {
+        dirBtn.id = 'btn-toggle-dir-sheet';
+        dirBtn.addEventListener('click', function () {
+          var s = FPE.DataModel.findStairs(id);
+          FPE.DataModel.updateStairs(id, { direction: s.direction === 'up' ? 'down' : 'up' });
+          FPE.StairsManager.render();
+          if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+        });
+      }
+      var delBtn = container.querySelector('#btn-delete-stairs');
+      if (delBtn) {
+        delBtn.id = 'btn-delete-stairs-sheet';
+        delBtn.addEventListener('click', function () {
+          FPE.DataModel.removeStairs(id);
+          FPE.SelectionManager.deselect();
+          FPE.StairsManager.render();
+          if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+          closePropertySheet();
+        });
+      }
+    }
+
+    // 一括削除ボタン（複数選択時）
+    var deleteAllBtn = container.querySelector('#btn-delete-all');
+    if (deleteAllBtn) {
+      deleteAllBtn.id = 'btn-delete-all-sheet';
+      deleteAllBtn.addEventListener('click', function () {
+        FPE.SelectionManager.deleteAllSelected();
+        closePropertySheet();
+      });
+    }
+  }
+
+  function closePropertySheet() {
+    var overlay = document.getElementById('property-sheet-overlay');
+    if (overlay) {
+      overlay.classList.remove('visible');
+      overlay.style.display = 'none';
+    }
+  }
+
+  /** コピー処理（キーボード・タッチ共用） */
+  function doCopy() {
+    var count = FPE.SelectionManager.getSelectedCount();
+    if (count === 0) return;
+
+    var selectedIds = FPE.SelectionManager.getSelectedIds();
+    var selectedTypes = FPE.SelectionManager.getSelectedTypes();
+    var minX = Infinity, minY = Infinity;
+    var items = [];
+
+    selectedIds.forEach(function (id) {
+      var type = selectedTypes[id];
+      if (type === 'room') {
+        var room = FPE.DataModel.findRoom(id);
+        if (!room) return;
+        var bounds = FPE.SelectionManager.getRoomBounds(room);
+        minX = Math.min(minX, bounds.x);
+        minY = Math.min(minY, bounds.y);
+        items.push({
+          type: 'room',
+          data: { name: room.name, color: room.color, parts: JSON.parse(JSON.stringify(room.parts || [])) },
+        });
+      } else if (type === 'stairs') {
+        var s = FPE.DataModel.findStairs(id);
+        if (!s) return;
+        minX = Math.min(minX, s.x);
+        minY = Math.min(minY, s.y);
+        items.push({
+          type: 'stairs',
+          data: { x: s.x, y: s.y, width: s.width, height: s.height, direction: s.direction, stairType: s.stairType, rotation: s.rotation, linkedStairsId: null },
+        });
+      }
+    });
+
+    if (items.length === 0) return;
+    objectClipboard = { bounds: { minX: minX, minY: minY }, items: items };
+  }
+
+  /** ペースト処理（キーボード・タッチ共用） */
+  function doPaste() {
+    if (!objectClipboard) return;
+
+    // タッチ時はビューポート中心に配置、PC時はカーソル位置
+    var cursor;
+    if (FPE.TouchManager && FPE.TouchManager.isTouchDevice()) {
+      var rect = svg.getBoundingClientRect();
+      cursor = FPE.Viewport.screenToGrid(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    } else {
+      cursor = FPE.Viewport.getLastCursorGrid ? FPE.Viewport.getLastCursorGrid() : { x: 0, y: 0 };
+    }
+    var snapped = FPE.Snap.point(cursor.x, cursor.y);
+    var deltaX = snapped.x - objectClipboard.bounds.minX;
+    var deltaY = snapped.y - objectClipboard.bounds.minY;
+
+    var newSelected = [];
+    var hasRoom = false;
+
+    objectClipboard.items.forEach(function (it) {
+      if (it.type === 'room') {
+        hasRoom = true;
+        var roomData = JSON.parse(JSON.stringify(it.data));
+        roomData.parts.forEach(function (p) {
+          p.x = FPE.Snap.toGrid(p.x + deltaX);
+          p.y = FPE.Snap.toGrid(p.y + deltaY);
+        });
+        var addedRoom = FPE.DataModel.addRoom(roomData);
+        newSelected.push({ id: addedRoom.id, type: 'room' });
+      } else if (it.type === 'stairs') {
+        var stairsData = JSON.parse(JSON.stringify(it.data));
+        stairsData.x = FPE.Snap.toGrid(stairsData.x + deltaX);
+        stairsData.y = FPE.Snap.toGrid(stairsData.y + deltaY);
+        var addedStairs = FPE.DataModel.addStairs(stairsData);
+        newSelected.push({ id: addedStairs.id, type: 'stairs' });
+      }
+    });
+
+    if (newSelected.length === 0) return;
+    FPE.SelectionManager.selectMultiple(newSelected);
+    FPE.ToolManager.setTool('select');
+    FPE.RoomManager.render();
+    FPE.StairsManager.render();
+    if (FPE.WallManager) {
+      if (hasRoom) FPE.WallManager.generateWalls();
+      else FPE.WallManager.renderWalls();
+    }
+    if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+  }
+
+  /** 削除処理（キーボード・タッチ共用） */
+  function doDelete() {
+    var count = FPE.SelectionManager.getSelectedCount();
+    if (count === 0) return;
+
+    if (count > 1) {
+      FPE.SelectionManager.deleteAllSelected();
+    } else {
+      var id = FPE.SelectionManager.getSelectedId();
+      var type = FPE.SelectionManager.getSelectedType();
+      if (!id) return;
+      if (type === 'room') {
+        FPE.DataModel.removeRoom(id);
+        FPE.SelectionManager.deselect();
+        FPE.RoomManager.render();
+        if (FPE.WallManager) FPE.WallManager.generateWalls();
+        if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+      } else if (type === 'stairs') {
+        FPE.DataModel.removeStairs(id);
+        FPE.SelectionManager.deselect();
+        FPE.StairsManager.render();
+        if (FPE.HistoryManager) FPE.HistoryManager.snapshot();
+      }
+    }
+  }
+
+  function buildPresetSheet() {
+    var grid = document.getElementById('preset-sheet-grid');
+    if (!grid) return;
+    FPE.CONST.ROOM_PRESETS.forEach(function (preset) {
+      var btn = document.createElement('button');
+      btn.className = 'sheet-preset-btn';
+      btn.innerHTML = '<span class="sheet-preset-color" style="background:' + preset.color + '"></span>' + preset.name;
+      btn.addEventListener('click', function () {
+        FPE.RoomManager.addPreset(preset);
+        // シートを閉じる
+        var overlay = document.getElementById('preset-sheet-overlay');
+        if (overlay) {
+          overlay.classList.remove('visible');
+          overlay.style.display = 'none';
+        }
+      });
+      grid.appendChild(btn);
+    });
+  }
+
+  /** コンテキストアクションバーの表示/非表示更新 */
+  function updateContextBar() {
+    if (!FPE.TouchManager || !FPE.TouchManager.isTouchDevice()) return;
+    var bar = document.getElementById('context-action-bar');
+    if (!bar) return;
+    var count = FPE.SelectionManager.getSelectedCount();
+    var tool = FPE.ToolManager.getTool();
+    // 選択中かつ選択ツール時のみ表示（opening等のツール中は非表示）
+    bar.style.display = (count > 0 && tool === 'select') ? 'flex' : 'none';
+  }
+
+  /** コンテキストメニュー表示 */
+  function showContextMenu(x, y, items) {
+    var menu = document.getElementById('touch-context-menu');
+    if (!menu) return;
+    menu.innerHTML = '';
+    items.forEach(function (item) {
+      var btn = document.createElement('button');
+      btn.className = 'tcm-item' + (item.danger ? ' tcm-danger' : '');
+      btn.textContent = item.label;
+      btn.addEventListener('click', function () {
+        hideContextMenu();
+        if (item.action) item.action();
+      });
+      menu.appendChild(btn);
+    });
+    menu.style.left = Math.min(x, window.innerWidth - 180) + 'px';
+    menu.style.top = Math.max(0, y - items.length * 48) + 'px';
+    menu.style.display = 'block';
+
+    // 背景タップで閉じる
+    setTimeout(function () {
+      document.addEventListener('touchstart', _closeMenuOnOutside, { once: true });
+      document.addEventListener('click', _closeMenuOnOutside, { once: true });
+    }, 50);
+  }
+
+  function hideContextMenu() {
+    var menu = document.getElementById('touch-context-menu');
+    if (menu) menu.style.display = 'none';
+  }
+
+  function _closeMenuOnOutside(e) {
+    var menu = document.getElementById('touch-context-menu');
+    if (menu && !menu.contains(e.target)) {
+      hideContextMenu();
+    }
+  }
+
   return {
     init: init,
+    updateContextBar: updateContextBar,
+    showContextMenu: showContextMenu,
+    hideContextMenu: hideContextMenu,
+    doCopy: doCopy,
+    doPaste: doPaste,
+    doDelete: doDelete,
   };
 })();
 // app.js - エントリポイント・初期化
@@ -3584,6 +4269,9 @@ window.FPE = window.FPE || {};
     var svg = document.getElementById('main-svg');
     FPE.Viewport.init(svg);
     FPE.Viewport.setPan(60, 60);
+
+    // タッチマネージャ初期化
+    if (FPE.TouchManager) FPE.TouchManager.init(svg);
 
     // グリッド描画
     FPE.GridRenderer.init();
