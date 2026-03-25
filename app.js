@@ -80,9 +80,9 @@ FPE.Snap = {
     return { x: this.toGrid(x), y: this.toGrid(y) };
   },
 
-  /** サイズを最小値以上にスナップ（最小0.5グリッド） */
+  /** サイズを最小値以上にスナップ（最小0.25グリッド） */
   size(value, min) {
-    min = min || 0.5;
+    min = min || 0.25;
     const snapped = this.toGrid(value);
     return Math.max(min, snapped);
   },
@@ -2000,7 +2000,7 @@ FPE.RoomManager = (function () {
       var h = Math.abs(snapped.y - dragStart.y);
       w = FPE.Snap.size(w);
       h = FPE.Snap.size(h);
-      if (w >= 0.5 && h >= 0.5) {
+      if (w >= 0.25 && h >= 0.25) {
         var room = FPE.DataModel.addRoom({
           name: FPE.CONST.DEFAULT_ROOM_NAME,
           color: FPE.CONST.DEFAULT_ROOM_COLOR,
@@ -2211,18 +2211,18 @@ FPE.RoomManager = (function () {
     var newX = p.x, newY = p.y, newW = p.width, newH = p.height;
 
     if (dir.includes('w')) {
-      newX = Math.min(gridPos.x, orig.x + orig.width - 0.5);
+      newX = Math.min(gridPos.x, orig.x + orig.width - 0.25);
       newW = orig.x + orig.width - newX;
     }
     if (dir.includes('e')) {
-      newW = Math.max(0.5, gridPos.x - orig.x);
+      newW = Math.max(0.25, gridPos.x - orig.x);
     }
     if (dir.includes('n')) {
-      newY = Math.min(gridPos.y, orig.y + orig.height - 0.5);
+      newY = Math.min(gridPos.y, orig.y + orig.height - 0.25);
       newH = orig.y + orig.height - newY;
     }
     if (dir.includes('s')) {
-      newH = Math.max(0.5, gridPos.y - orig.y);
+      newH = Math.max(0.25, gridPos.y - orig.y);
     }
 
     p.x = newX;
@@ -3217,7 +3217,7 @@ FPE.StairsManager = (function () {
     var w = FPE.Snap.size(Math.abs(snapped.x - dragStart.x));
     var h = FPE.Snap.size(Math.abs(snapped.y - dragStart.y));
 
-    if (w >= 0.5 && h >= 0.5) {
+    if (w >= 0.25 && h >= 0.25) {
       var s = FPE.DataModel.addStairs({
         x: x, y: y, width: w, height: h,
         direction: 'up',
